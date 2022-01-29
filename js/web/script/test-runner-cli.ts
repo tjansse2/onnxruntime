@@ -451,7 +451,8 @@ function run(config: Test.Config) {
     // STEP 5. use Karma to run test
     npmlog.info('TestRunnerCli.Run', '(5/5) Running karma to start test runner...');
     const karmaCommand = path.join(npmBin, 'karma');
-    const browser = getBrowserNameFromEnv(args.env, args.debug);
+    const webgpu = args.backends.indexOf('webgpu') > -1;
+    const browser = getBrowserNameFromEnv(args.env, args.debug, webgpu);
     const karmaArgs = ['start', `--browsers ${browser}`];
     if (args.debug) {
       karmaArgs.push('--log-level info --timeout-mocha 9999999');
@@ -460,6 +461,9 @@ function run(config: Test.Config) {
     }
     if (args.noSandbox) {
       karmaArgs.push('--no-sandbox');
+    }
+    if (webgpu) {
+      karmaArgs.push('--force-localhost');
     }
     karmaArgs.push(`--bundle-mode=${args.bundleMode}`);
     if (browser === 'Edge') {
@@ -552,10 +556,20 @@ function saveConfig(config: Test.Config) {
   fs.writeJSONSync(path.join(TEST_ROOT, './testdata-config.json'), config);
 }
 
-function getBrowserNameFromEnv(env: TestRunnerCliArgs['env'], debug?: boolean) {
+function getBrowserNameFromEnv(env: TestRunnerCliArgs['env'], debug?: boolean, webgpu?: boolean) {
   switch (env) {
-    case 'chrome':
-      return debug ? 'ChromeDebug' : 'ChromeTest';
+    case 'chrome': {
+      let browserName = 'Chrome';
+      if (webgpu) {
+        browserName += 'Canary';
+      }
+      if (debug) {
+        browserName += 'Debug';
+      } else {
+        browserName += 'Test';
+      }
+      return browserName;
+    }
     case 'edge':
       return 'Edge';
     case 'firefox':
