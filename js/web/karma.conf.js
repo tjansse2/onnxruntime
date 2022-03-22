@@ -82,7 +82,7 @@ module.exports = function (config) {
     customLaunchers: {
       ChromeTest: { base: 'ChromeHeadless', flags: ['--window-size=1,1', '--enable-features=SharedArrayBuffer'] },
       ChromeDebug: { debug: true, base: 'Chrome', flags: ['--remote-debugging-port=9333', '--enable-features=SharedArrayBuffer'] },
-      ChromeCanaryTest: { base: 'ChromeCanaryHeadless', flags: ['--window-size=1,1', '--enable-features=SharedArrayBuffer', '--enable-unsafe-webgpu'] },
+      ChromeCanaryTest: { base: 'ChromeCanary', flags: ['--window-size=1,1', '--enable-features=SharedArrayBuffer', '--enable-unsafe-webgpu'] },
       ChromeCanaryDebug: { debug: true, base: 'ChromeCanary', flags: ['--remote-debugging-port=9333', '--enable-features=SharedArrayBuffer', '--enable-unsafe-webgpu'] },
 
       //
