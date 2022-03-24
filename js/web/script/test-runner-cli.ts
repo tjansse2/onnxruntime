@@ -47,7 +47,7 @@ if (shouldLoadSuiteTestData) {
 
 // The default backends and opset version lists. Those will be used in suite tests.
 const DEFAULT_BACKENDS: readonly TestRunnerCliArgs.Backend[] =
-    args.env === 'node' ? ['cpu', 'wasm'] : ['wasm', 'webgl'];
+    args.env === 'node' ? ['cpu', 'wasm'] : ['wasm', 'webgl', 'webgpu'];
 const DEFAULT_OPSET_VERSIONS: readonly number[] = [13, 12, 11, 10, 9, 8, 7];
 
 const FILE_CACHE_ENABLED = args.fileCache;         // whether to enable file cache
