@@ -5,6 +5,7 @@ import onnx
 import copy
 from .onnxflow_pb2 import OnnxFlowParameter, OnnxFlowParameters
 
+
 def _build_gradient_model(model, requires_grad_params, frozen_params):
     # Collect names of parameters that need gradients computed
     trainable_parameters = set()
@@ -37,8 +38,8 @@ def _build_gradient_model(model, requires_grad_params, frozen_params):
     grad_model = onnx.helper.make_model(graph_with_initializers_as_inputs,
                                         producer_name='onnxflow',
                                         opset_imports=[
-                                            onnx.helper.make_opsetid('com.microsoft', 1)] + \
-                                            list(model.opset_import))
+                                            onnx.helper.make_opsetid('com.microsoft', 1)] +
+                                        list(model.opset_import))
 
     # Any parameter or input that requires gradient, should have been already added to
     # requires_grad_params
@@ -52,6 +53,7 @@ def _build_gradient_model(model, requires_grad_params, frozen_params):
                                    'loss')
     builder.build()
     return onnx.load_from_string(builder.get_model())
+
 
 def _build_gradient_accumulation_model(grad_model):
     graph_inputs = grad_model.graph.input
@@ -70,10 +72,10 @@ def _build_gradient_accumulation_model(grad_model):
 
         # Gradient accumulation node
         acc_node = onnx.helper.make_node("InPlaceAccumulator",
-                                [grad_accumulation_buffer_name, grad_name],
-                                [grad_accumulation_output_name],
-                                name=f"GradientAccumulator{idx}",
-                                domain='com.microsoft')
+                                         [grad_accumulation_buffer_name, grad_name],
+                                         [grad_accumulation_output_name],
+                                         name=f"GradientAccumulator{idx}",
+                                         domain='com.microsoft')
 
         graph_nodes.append(acc_node)
 
@@ -131,10 +133,13 @@ class Graph(ABC):
         # build the user model
         user_model = self.build(*args, **kwargs)
 
+        onnx.save(user_model, "lossful_graph.onnx")
+
         # validate and check the model
         onnx.checker.check_model(user_model, True)
 
         return user_model
+
 
 class TrainingGraph(Graph):
     def __init__(self):
@@ -156,7 +161,8 @@ class TrainingGraph(Graph):
     def parameters(self):
         # return parameters that can be serialized by the user
         if self._parameters is None:
-            raise RuntimeError("Please build the training graph first before trying to retrieve the parameters.")
+            raise RuntimeError(
+                "Please build the training graph first before trying to retrieve the parameters.")
 
         return self._parameters
 
@@ -165,10 +171,12 @@ class TrainingGraph(Graph):
         user_model = self.build(*args, **kwargs)
 
         # get all the model parameters for the user_model
-        self._parameters = _get_model_parameters(user_model, self._requires_grad, self._frozen)
+        self._parameters = _get_model_parameters(
+            user_model, self._requires_grad, self._frozen)
 
         # build the gradient graph
-        grad_model = _build_gradient_model(user_model, self._requires_grad, self._frozen)
+        grad_model = _build_gradient_model(
+            user_model, self._requires_grad, self._frozen)
 
         # add gradient accumulation nodes
         grad_model = _build_gradient_accumulation_model(grad_model)
