@@ -4,6 +4,7 @@
 #include "accelerator.h"
 #include "cuda.h"
 #include "cuda_runtime.h"
+#include "nvToolsExt.h"
 #include <iostream>
 #include <string>
 #include <torch/csrc/jit/passes/onnx.h>
@@ -17,6 +18,8 @@
 #include "bridge.h"
 #include "debug.h"
 #include "flags.h"
+#include <ATen/cuda/CUDAContext.h>
+#include <sstream>
 
 namespace onnxruntime {
 namespace lazytensor {
@@ -28,6 +31,19 @@ namespace prim = torch::jit::prim;
 // static variable used to create inference session and training session.
 const static std::string env_name = std::string("LTC");
 static std::unique_ptr<onnxruntime::Environment> ltc_env;
+
+class NvtxRange {
+ public:
+  NvtxRange(const char* name) {
+    nvtxRangePush(name);
+  }
+  NvtxRange(const std::string& name) {
+    nvtxRangePush(name.c_str());
+  }
+  ~NvtxRange() {
+    nvtxRangePop();
+  }
+};
 
 onnxruntime::Environment& GetLtcEnv() {
   if (!ltc_env) {
@@ -52,7 +68,7 @@ bool Accelerator::Supported(const torch::jit::Node* node) {
   //std::cout << "Judge op: " << ToString(*node) << std::endl;
   switch (node->kind()) {
     // TODO: add as many ops as possible.
-    //case aten::addmm:
+    case aten::embedding:
     case aten::tanh:
     case aten::slice:
     case aten::bmm:
@@ -80,35 +96,6 @@ bool Accelerator::Supported(const torch::jit::Node* node) {
     case aten::max:
     case aten::min: {
       return true;
-      //bool supported = true;
-      //for (size_t i = 0; i < node->outputs().size(); ++i) {
-      //  c10::TypePtr type = node->outputs().at(i)->type();
-      //  if (type->isSubtypeOf(*c10::TensorType::get()) ||
-      //      type->isSubtypeOf(*c10::NumberType::get())) {
-      //    continue;
-      //  }
-      //  supported = false;
-      //  break;
-      //}
-      //for (size_t i = 0; i < node->inputs().size(); ++i) {
-      //  c10::TypePtr type = node->inputs().at(i)->type();
-      //  if (type->isSubtypeOf(*c10::TensorType::get()) ||
-      //      type->isSubtypeOf(*c10::NumberType::get())) {
-      //    continue;
-      //  }
-      //  supported = false;
-      //  break;
-      //}
-      //if (DumpAtenOpHistory()) {
-      //  if (supported) {
-      //    std::cout << "Supported op: "
-      //              << ToString(*node) << std::endl;
-      //  } else {
-      //    std::cout << "Unsupported op: "
-      //              << ToString(*node) << std::endl;
-      //  }
-      //}
-      //return supported;
     }
     default: {
       if (DumpAtenOpHistory()) {
@@ -126,9 +113,12 @@ bool Accelerator::Supported(const torch::jit::Node* node) {
 }
 
 void Accelerator::OrtRun(torch::jit::Stack& stack) {
+  // TODO: use __func__.
+  NvtxRange range("Accelerator::OrtRun");
+  NvtxRange range_graph(subgraph_->toString(true));
   if (DumpGraph()) {
     std::cout << "[ORT,Graph]\n"
-              << *subgraph_;
+              << subgraph_->toString(true);
   }
 
   // Get these inputs from the stack.
@@ -165,9 +155,11 @@ void Accelerator::OrtRun(torch::jit::Stack& stack) {
 }
 
 void Accelerator::PytorchRun(torch::jit::Stack& stack) {
+  DynamicSettings::GetInstance().SetOnnxFusionFlag(false);
+  NvtxRange range("Accelerator::PytorchRun");
   if (DumpGraph()) {
     std::cout << "[Pytorch,Graph]\n"
-              << *subgraph_;
+              << subgraph_->toString(true);
   }
   if (DumpInputsOutputs()) {
     at::ArrayRef<c10::IValue> inputs = torch::jit::last(
@@ -183,9 +175,11 @@ void Accelerator::PytorchRun(torch::jit::Stack& stack) {
         stack, subgraph_->outputs().size());
     std::cout << "[PyTorch,Output] " << ToString(outputs) << std::endl;
   }
+  DynamicSettings::GetInstance().SetOnnxFusionFlag(true);
 }
 
 void Accelerator::DebugRun(torch::jit::Stack& stack) {
+  NvtxRange range("Accelerator::DebugRun");
   torch::jit::Stack copy;
   copy = stack;
   OrtRun(stack);
@@ -204,13 +198,10 @@ void Accelerator::Run(torch::jit::Stack& stack) {
   if (run_type == "debug") {
     // Run both ORT and Pytorch to execute the subgraph
     // and compare their output types and shapes.
-    std::cout << "Debug run\n";
     DebugRun(stack);
   } else if (run_type == "ort") {
-    std::cout << "ORT run\n";
     OrtRun(stack);
   } else if (run_type == "pytorch") {
-    std::cout << "PTH run\n";
     PytorchRun(stack);
   } else {
     ORT_THROW("Unknown run type: ", run_type);
@@ -220,6 +211,7 @@ void Accelerator::Run(torch::jit::Stack& stack) {
 static void CheckArgs(
     const at::ArrayRef<c10::IValue>& inputs) {
   // TODO: remove this check.
+  NvtxRange range("CheckArgs");
   TORCH_CHECK(inputs.size(), "Need at least one input.");
   for (const auto& input : inputs) {
     TORCH_CHECK(input.isTensor() || input.isScalar(), "Compiler can only handle Tensor or Scalar inputs.");
@@ -256,33 +248,10 @@ static void PropagateArgTypes(
 // Be aware of GIL issue.
 // The returned value is the path to exported
 // ONNX file.
-//
-// TODO: Instead of using file, we should return
-// in-memory data structure from Python.
-//static std::string ExportToOnnx(
-//    std::shared_ptr<torch::jit::Graph> graph,
-//    const at::ArrayRef<c10::IValue>& args) {
-//  // ONNX exporter modifies the graph in-place, so we
-//  // need to clone it to avoid interaction between
-//  // Pytorch's JIT mechanism and ONNX graph.
-//  std::shared_ptr<torch::jit::Graph> new_subgraph(graph->copyUnique().release());
-//  // Acquire GIL since Python is not multi-threading.
-//  pybind11::gil_scoped_acquire guard{};
-//  // Retrieve Python exporter function.
-//  pybind11::function export_to_onnx =
-//      pybind11::reinterpret_borrow<pybind11::function>(
-//          pybind11::module::import("onnxruntime.training.experimental.exporter").attr("_export"));
-//  // Fill types up. The sub-graphp from LazyTensor doesn't
-//  // contain input shapes.
-//  PropagateArgTypes(args, new_subgraph);
-//  // Execute Python function.
-//  auto result = export_to_onnx(new_subgraph, ::torch::onnx::OperatorExportTypes::ONNX);
-//  return result.cast<std::string>();
-//}
-
-static std::string ExportToOnnx1(
+static std::string ExportToOnnx(
     std::shared_ptr<torch::jit::Graph> graph,
     const at::ArrayRef<c10::IValue>& args) {
+  NvtxRange range("ExportToOnnx");
   // ONNX exporter modifies the graph in-place, so we
   // need to clone it to avoid interaction between
   // Pytorch's JIT mechanism and ONNX graph.
@@ -304,6 +273,7 @@ static std::string ExportToOnnx1(
 // Create an empty session object.
 // Models will be loaded later.
 static std::unique_ptr<onnxruntime::InferenceSession> CreateSession() {
+  NvtxRange range("CreateSession");
   // Enviroment shared by all sessions.
   static onnxruntime::Environment& pybind_default_env = GetLtcEnv();
   // All sessions use the same config.
@@ -337,31 +307,27 @@ static OrtDevice CheckAndGetTensorDevice(at::ArrayRef<c10::IValue>& values) {
   return CreateOrtDevice(unique_tensor_device);
 }
 
+// Wrapper of memory allocation function.
 void* CudaAllocDelegate(size_t nbytes) {
-  void* ptr = nullptr;
-  cudaError_t err = cudaMalloc(&ptr, nbytes);
-  std::cout << "CudaAllocDelegate" << std::endl;
-  if (err != cudaSuccess) {
-    throw std::runtime_error("CudaAlloc failed: " + std::string(cudaGetErrorString(err)));
-  }
-  return ptr;
+  auto allocator = at::cuda::getCUDADeviceAllocator();
+  return allocator->raw_allocate(nbytes);
 }
 
+// Wrapper of memory de-allocation function.
 void CudaFreeDelegate(void* ptr) {
-  std::cout << "CudaFreeDelegate" << std::endl;
-  cudaError_t err = cudaFree(ptr);
-  if (err != cudaSuccess) {
-    throw std::runtime_error("CudaFree failed: " + std::string(cudaGetErrorString(err)));
-  }
+  auto allocator = at::cuda::getCUDADeviceAllocator();
+  allocator->raw_deallocate(ptr);
 }
 
-class UniqueCudaEp {
+// Class holding the CUDA EPs (one unique EP per device)
+// shared by all sessions.
+class CudaEpPool {
 public:
-  static UniqueCudaEp& GetInstance() {
-    static UniqueCudaEp instance;
+  static CudaEpPool& GetInstance() {
+    static CudaEpPool instance;
     return instance;
   }
-  UniqueCudaEp() {
+  CudaEpPool() {
     OrtCUDAProviderOptions provider_options{};
     provider_options.do_copy_in_default_stream = true;
     provider_options.alloc = CudaAllocDelegate;
@@ -375,7 +341,6 @@ public:
     }
   }
   std::shared_ptr<IExecutionProvider> GetEp(const int device_id) {
-    std::cout << "[UniqueCudaEp::GetEp]" << std::endl;
     return cuda_eps_.at(device_id);
   }
 private:
@@ -388,24 +353,14 @@ static void InitializeSession(
     const OrtDevice device,
     const std::string& serialized_model,
     onnxruntime::InferenceSession& sess) {
+  NvtxRange range("InitializeSession");
   // Add EPs.
-  std::cout << "[InitializeSession]\n";
 #ifdef USE_CUDA
   // When CUDA is enabled, some CUDA-only graph graph fusions are enabled.
   // If we don't add CUDA EP, ONNX Runtime may throw even when running MNIST.
   // Information needed to construct CUDA execution providers.
-  //onnxruntime::CUDAExecutionProviderExternalAllocatorInfo allocator_info{
-  //  cudaMalloc,
-  //  cudaFree,
-  //  nullptr};
-  //OrtCUDAProviderOptions provider_options{};
-  //provider_options.do_copy_in_default_stream = true;
-  //provider_options.alloc = CudaAllocDelegate;
-  //provider_options.free = CudaFreeDelegate;
-  //auto factory = onnxruntime::CreateExecutionProviderFactory_Cuda(&provider_options);
-  //ORT_THROW_IF_ERROR(sess.RegisterExecutionProvider(factory->CreateProvider()));
   if (device.Type() == OrtDevice::GPU) {
-    ORT_THROW_IF_ERROR(sess.RegisterExecutionProvider(UniqueCudaEp::GetInstance().GetEp(device.Id())));
+    ORT_THROW_IF_ERROR(sess.RegisterExecutionProvider(CudaEpPool::GetInstance().GetEp(device.Id())));
   }
 #endif
   ORT_THROW_IF_ERROR(sess.Load(serialized_model.data(), serialized_model.size()));
@@ -413,6 +368,7 @@ static void InitializeSession(
 }
 
 void Accelerator::ExampleRun(at::ArrayRef<c10::IValue> inputs) {
+  NvtxRange range("[Accelerator::Compile] ExampleRun");
   torch::jit::Stack stack;
   for (auto input : inputs) {
     stack.push_back(input);
@@ -451,10 +407,8 @@ CompiledObject Accelerator::Compile(
     torch::jit::CompleteArgumentSpec spec, at::ArrayRef<c10::IValue>& args) {
   CheckArgs(args);
   DynamicSettings::GetInstance().SetOnnxFusionFlag(false);
-  std::cout << "Before example run. DynamicSettings::GetInstance().GetOnnxFusionFlag(): " << DynamicSettings::GetInstance().GetOnnxFusionFlag() << "\n";
   ExampleRun(args);
   DynamicSettings::GetInstance().SetOnnxFusionFlag(true);
-  std::cout << "After example run. DynamicSettings::GetInstance().GetOnnxFusionFlag(): " << DynamicSettings::GetInstance().GetOnnxFusionFlag() << "\n";
   // Storage of compilation.
   CompiledObject compiled;
   // Create an empty session.
@@ -462,8 +416,7 @@ CompiledObject Accelerator::Compile(
   // Let's get the empty session and initialize it.
   onnxruntime::InferenceSession& sess = *compiled.sess;
   // Export subgraph_ to ONNX.
-  //const std::string model_path = ExportToOnnx(subgraph_, args);
-  const std::string serialized_model = ExportToOnnx1(subgraph_, args);
+  const std::string serialized_model = ExportToOnnx(subgraph_, args);
   // Memory info for all tensors.
   // Assume all inputs are on the same device.
   OrtDevice shared_device = CheckAndGetTensorDevice(args);
@@ -497,51 +450,60 @@ CompiledObject Accelerator::Compile(
     // Outputs of ORT session.
     std::vector<OrtValue> fetches;
 
-    // Prepare inputs.
-    const auto num_inputs = subgraph_->inputs().size();
-    for (size_t i = 0; i < num_inputs; ++i) {
-      // The value can be either tensor or scalar.
-      // Scalar is a tensor with empty shape vector.
-      // Create ORT tensor from Pytorch tensor without copy.
-      if (args.at(i).isScalar()) {
-        // Scalar.
-        // ORT_ENFORCE(subgraph_->inputs().at(i)->type()->kind() == c10::TypeKind::TensorType);
-        feeds.push_back(CreateOrtScalarValue(args.at(i).toScalar()));
-      } else if (args.at(i).isTensor()) {
-        // Tensor.
-        ORT_ENFORCE(subgraph_->inputs().at(i)->type()->kind() == c10::TypeKind::TensorType);
-        feeds.push_back(CreateOrtTensorValue(args.at(i).toTensor()));
-      } else {
-        // Looks like LTC only passes scalars and tensors into backend, so we don't care
-        // other types for now.
-        ORT_THROW("Only tensor inputs are supported.");
+    {
+      NvtxRange range("Prepare inputs");
+      // Prepare inputs.
+      const auto num_inputs = subgraph_->inputs().size();
+      for (size_t i = 0; i < num_inputs; ++i) {
+        // The value can be either tensor or scalar.
+        // Scalar is a tensor with empty shape vector.
+        // Create ORT tensor from Pytorch tensor without copy.
+        if (args.at(i).isScalar()) {
+          // Scalar.
+          // ORT_ENFORCE(subgraph_->inputs().at(i)->type()->kind() == c10::TypeKind::TensorType);
+          feeds.push_back(CreateOrtScalarValue(args.at(i).toScalar()));
+        } else if (args.at(i).isTensor()) {
+          // Tensor.
+          ORT_ENFORCE(subgraph_->inputs().at(i)->type()->kind() == c10::TypeKind::TensorType);
+          feeds.push_back(CreateOrtTensorValue(args.at(i).toTensor()));
+        } else {
+          // Looks like LTC only passes scalars and tensors into backend, so we don't care
+          // other types for now.
+          ORT_THROW("Only tensor inputs are supported.");
+        }
       }
     }
 
-    // Inputs are ready. Let's run ORT.
-    ORT_THROW_IF_ERROR(sess.Run(
-        run_options,
-        feed_names, feeds,
-        fetch_names, &fetches, &fetches_device_info));
+    {
+      NvtxRange range("Call sess.Run");
+      // Inputs are ready. Let's run ORT.
+      ORT_THROW_IF_ERROR(sess.Run(
+          run_options,
+          feed_names, feeds,
+          fetch_names, &fetches, &fetches_device_info));
+    }
 
-    // Convert ORT output to Pytorch format.
     std::vector<c10::IValue> outputs;
-    for (size_t i = 0; i < fetches.size(); ++i) {
-      // Get the expected type of the i-th output.
-      const c10::TypePtr type = output_types_.at(i);
-      // Convert ORTValue to IValue.
-      if (type->isSubtypeOf(*c10::TensorType::get())) {
-        ORT_ENFORCE(fetches.at(i).IsTensor(), "Only ORT tensor can be translated to Pytorch tensor.");
-        auto value = CreateC10IvalueTensor(fetches.at(i));
-        auto expected_scalar_type = output_types_.at(i)->cast<c10::TensorType>()->scalarType().value();
-        outputs.push_back(value.toTensor().to(expected_scalar_type));
-      } else if (type->isSubtypeOf(*c10::NumberType::get())) {
-        // ORT represents scalar as tensor without shape.
-        ORT_ENFORCE(fetches.at(i).IsTensor(), "Only ORT tensor can be translated to Pytorch scalar.");
-        auto value = CreateC10IvalueScalar(fetches.at(i));
-        outputs.push_back(value);
-      } else {
-        ORT_ENFORCE(false, "Unsupported c10::Type ", type->str());
+    {
+      NvtxRange range("Convert outputs");
+      // Convert ORT output to Pytorch format.
+      for (size_t i = 0; i < fetches.size(); ++i) {
+        // Get the expected type of the i-th output.
+        const c10::TypePtr type = output_types_.at(i);
+        // Convert ORTValue to IValue.
+        if (type->isSubtypeOf(*c10::TensorType::get())) {
+          ORT_ENFORCE(fetches.at(i).IsTensor(), "Only ORT tensor can be translated to Pytorch tensor.");
+          auto value = CreateC10IvalueTensor(fetches.at(i));
+          auto expected_scalar_type = output_types_.at(i)->cast<c10::TensorType>()->scalarType().value();
+          outputs.push_back(value.toTensor().to(expected_scalar_type));
+        } else if (type->isSubtypeOf(*c10::NumberType::get())) {
+          // ORT represents scalar as tensor without shape.
+          ORT_ENFORCE(fetches.at(i).IsTensor(), "Only ORT tensor can be translated to Pytorch scalar.");
+          auto value = CreateC10IvalueScalar(fetches.at(i));
+          outputs.push_back(value);
+        } else {
+          ORT_ENFORCE(false, "Unsupported c10::Type ", type->str());
+        }
       }
     }
 

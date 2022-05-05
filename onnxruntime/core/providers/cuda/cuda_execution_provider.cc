@@ -271,7 +271,6 @@ CUDAExecutionProvider::PerThreadContext& CUDAExecutionProvider::GetPerThreadCont
 }
 
 void CUDAExecutionProvider::ReleasePerThreadContext() const {
-  std::cout << "CUDAExecutionProvider::ReleasePerThreadContext" << std::endl;
   const auto& per_thread_context_cache = PerThreadContextCache();
 
   auto cached_context_it = per_thread_context_cache->find(this);
