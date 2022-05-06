@@ -27,20 +27,37 @@ void Selectors::RegisterSelector(const OpVersionsAndSelector::OpVersionsMap& ops
 }
 
 /* static methods to return different operator's OpVersionMap */
-static const OpVersionsAndSelector::OpVersionsMap GetMiscOpVersionsMap() { return {{"Gather", {}},
-                                                                                   {"Reshape", {}},
-                                                                                   {"Transpose", {}},
-                                                                                   {"MaxPool", {12}},
-                                                                                   {"Resize", {}}}; }
+static const OpVersionsAndSelector::OpVersionsMap GetMiscOpVersionsMap() {
+  return {{"Gather", {}},
+          {"Reshape", {}},
+          {"Transpose", {}},
+          {"MaxPool", {12}},
+          {"Resize", {}},
+          {"Squeeze", {}},
+          {"Unsqueeze", {}}};
+}
 
-static const OpVersionsAndSelector::OpVersionsMap GetUnaryOpVersionsMap() { return {{"AveragePool", {}},
-                                                                                    {"Softmax", {}},
-                                                                                    {"LeakyRelu", {}}}; }
-static const OpVersionsAndSelector::OpVersionsMap GetBinaryOpVersionsMap() { return {{"Add", {}},
-                                                                                     {"Mul", {}}}; }
-static const OpVersionsAndSelector::OpVersionsMap GetVariadicOpVersionsMap() { return {{"Concat", {}}}; }
-static const OpVersionsAndSelector::OpVersionsMap GetConvOpVersionsMap() { return {{"Conv", {}}}; }
-static const OpVersionsAndSelector::OpVersionsMap GetMatMulOpVersionsMap() { return {{"MatMul", {}}}; }
+static const OpVersionsAndSelector::OpVersionsMap GetUnaryOpVersionsMap() {
+  return {{"AveragePool", {}},
+          {"Softmax", {}},
+          {"LeakyRelu", {}}};
+}
+static const OpVersionsAndSelector::OpVersionsMap GetBinaryOpVersionsMap() {
+  return {{"Add", {}},
+          {"Mul", {}}};
+}
+static const OpVersionsAndSelector::OpVersionsMap GetVariadicOpVersionsMap() {
+  return {{"Concat", {}}};
+}
+static const OpVersionsAndSelector::OpVersionsMap GetConvOpVersionsMap() {
+  return {{"Conv", {}}};
+}
+static const OpVersionsAndSelector::OpVersionsMap GetMatMulOpVersionsMap() {
+  return {{"MatMul", {}}};
+}
+static const OpVersionsAndSelector::OpVersionsMap GetGemmOpVersionsMap() {
+  return {{"Gemm", {}}};
+}
 
 /* Selector rules registration related */
 void RegisterMiscSelectors(Selectors& qdq_selectors) {
@@ -85,6 +102,13 @@ void RegisterMatMulSelector(Selectors& qdq_selectors) {
                                  std::move(selector));
 }
 
+void RegisterGemmSelector(Selectors& qdq_selectors) {
+  /* register selector for gemm op */
+  std::unique_ptr<NodeGroupSelector> selector = std::make_unique<GemmNodeGroupSelector>();
+  qdq_selectors.RegisterSelector(GetGemmOpVersionsMap(),
+                                 std::move(selector));
+}
+
 void SelectorManager::CreateSelectors() {
   RegisterMiscSelectors(qdq_selectors_);
   RegisterUnarySelectors(qdq_selectors_);
@@ -92,6 +116,7 @@ void SelectorManager::CreateSelectors() {
   RegisterVariadicSelectors(qdq_selectors_);
   RegisterConvSelector(qdq_selectors_);
   RegisterMatMulSelector(qdq_selectors_);
+  RegisterGemmSelector(qdq_selectors_);
 }
 
 void SelectorManager::InitializeSelectorsMap() {

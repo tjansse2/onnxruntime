@@ -159,6 +159,8 @@ struct TensorProto final {
 
   static bool DataType_IsValid(int value) { return g_host->TensorProto_DataType_IsValid(value); }
 
+  void copy_from(const TensorProto* other) { return g_host->TensorProto__CopyFrom(this, other); }
+
   TensorProto() = delete;
   TensorProto(const TensorProto&) = delete;
 };
@@ -240,6 +242,8 @@ struct TypeProto_Sequence final {
 };
 
 struct TypeProto final {
+  static std::unique_ptr<TypeProto> Create() { return g_host->TypeProto__construct(); }
+
   const TypeProto_Tensor& tensor_type() const { return g_host->TypeProto__tensor_type(this); }
   TypeProto_Tensor* mutable_tensor_type() { return g_host->TypeProto__mutable_tensor_type(this); }
 
@@ -268,7 +272,10 @@ struct TypeProto final {
 
   ValueCase value_case() const { return ValueCase(g_host->TypeProto__value_case(this)); }
 
-  PROVIDER_DISALLOW_ALL(TypeProto)
+  void copy_from(const TypeProto* other) { return g_host->TypeProto__CopyFrom(this, other); }
+
+  TypeProto() = delete;
+  TypeProto(const TypeProto&) = delete;
 };
 
 struct ValueInfoProto final {
@@ -465,6 +472,7 @@ struct KernelDefBuilder final {
     return *this;
   }
 
+#ifdef ENABLE_TRAINING
   KernelDefBuilder& MayStridedInput(int input_index) {
     g_host->KernelDefBuilder__MayStridedInput(this, input_index);
     return *this;
@@ -474,6 +482,7 @@ struct KernelDefBuilder final {
     g_host->KernelDefBuilder__MayStridedOutput(this, input_index, output_index);
     return *this;
   }
+#endif
 
   std::unique_ptr<KernelDef> Build() {
     return g_host->KernelDefBuilder__Build(this);
@@ -703,6 +712,8 @@ struct GraphViewer final {
   const std::vector<NodeIndex>& GetNodesInTopologicalOrder() const { return g_host->GraphViewer__GetNodesInTopologicalOrder(this); }
   const std::vector<const NodeArg*>& GetInputsIncludingInitializers() const noexcept { return g_host->GraphViewer__GetInputsIncludingInitializers(this); }
 
+  void ToProto(ONNX_NAMESPACE::GraphProto& graph_proto, bool include_initializers, bool include_outer_scope_args) const { g_host->GraphViewer__ToProto(this, graph_proto, include_initializers, include_outer_scope_args); }
+
   GraphViewer() = delete;
   GraphViewer(const GraphViewer&) = delete;
   void operator=(const GraphViewer&) = delete;
@@ -735,6 +746,8 @@ struct OpKernelContext final {
   int OutputCount() const { return g_host->OpKernelContext__OutputCount(this); }
 
   Status GetTempSpaceAllocator(AllocatorPtr* output) const { return g_host->OpKernelContext__GetTempSpaceAllocator(this, output); }
+
+  Status GetTempSpaceCPUAllocator(AllocatorPtr* output) const { return g_host->OpKernelContext__GetTempSpaceCPUAllocator(this, output); }
 
   bool GetUseDeterministicCompute() const { return g_host->OpKernelContext__GetUseDeterministicCompute(this); }
 
@@ -807,7 +820,7 @@ struct OpKernelInfo final {
     return GetAttrs<T>(name, tmp).IsOK() ? tmp : default_value;
   }
 
-  template<typename T>
+  template <typename T>
   Status GetAttrsAsSpan(const std::string& name, gsl::span<const T>& out) const;
 
   Status GetAttrs(const std::string& name, TensorShapeVector& out) const;
@@ -861,8 +874,6 @@ inline TensorShapeVector OpKernelInfo::GetAttrsOrDefault(const std::string& name
   return GetAttrs(name, tmp).IsOK() ? tmp : default_value;
 }
 
-
-
 class SessionState {
  public:
   const DataTransferManager& GetDataTransferMgr() const noexcept { return g_host->SessionState__GetDataTransferMgr(this); }
@@ -910,9 +921,13 @@ struct Tensor final {
   MLDataType DataType() const { return g_host->Tensor__DataType(this); }
   bool IsDataTypeString() const { return g_host->Tensor__IsDataTypeString(this); }
 
+#ifdef ENABLE_TRAINING
   gsl::span<const int64_t> Strides() const noexcept { return g_host->Tensor__Strides(this); }
   bool IsContiguous() const { return g_host->Tensor__IsContiguous(this); }
-  void SetStrides(const TensorShapeVector& new_strides) { return g_host->Tensor__SetStrides(this, new_strides); }
+  void SetShapeAndStrides(const TensorShape& new_shape, gsl::span<const int64_t> new_strides) {
+    return g_host->Tensor__SetShapeAndStrides(this, new_shape, new_strides);
+  }
+#endif
 
   template <class T>
   bool IsDataType() const;

@@ -485,14 +485,14 @@ ONNX_MS_OPERATOR_SET_SCHEMA(Gelu, 1,
                                   auto* tp = ctx.getInputType(0);
                                   if ((tp == nullptr) || (!tp->has_tensor_type()))
                                     return false;
-                                  auto elem_type = tp->tensor_type().elem_type();
+                                  auto elem_type = (TensorProto_DataType)(tp->tensor_type().elem_type());
 
                                   FunctionBuilder builder(functionProto);
                                   builder
                                       .AddOpset("", 13)
-                                      .Const("Half", 0.5, elem_type)
-                                      .Const("One", 1.0, elem_type)
-                                      .Const("C", std::sqrt(0.5), elem_type)
+                                      .Const("Half", ToTensor(0.5, elem_type))
+                                      .Const("One", ToTensor(1.0, elem_type))
+                                      .Const("C", ToTensor(std::sqrt(0.5), elem_type))
                                       .Add(R"(
                 CX = Mul (C, X)
                 ERFCX = Erf (CX)
@@ -919,10 +919,9 @@ ONNX_MS_OPERATOR_SET_SCHEMA(BeamSearch, 1,
                                 .Attr("pad_token_id", "The id of the padding token", AttributeProto::INT)
                                 .Attr("no_repeat_ngram_size", "no repeat ngrams size", AttributeProto::INT, static_cast<int64_t>(0))
                                 .Attr("early_stopping", "early stop or not", AttributeProto::INT, static_cast<int64_t>(0))
-                                .Attr(
-                                    "body",
-                                    "The GPT-2 subgraph with input_ids, position_ids, attention_mask, past_0, past_1, ... as inputs, and logits, present_0, present_1, ... as output",
-                                    AttributeProto::GRAPH)
+                                .Attr("model_type", "model type: 0 for GPT-2; 1 for encoder decoder like T5", AttributeProto::INT, static_cast<int64_t>(0))
+                                .Attr("encoder_decoder_init", "subgraph for initialization of encoder and decoder. It will be called once before decoder subgraph.", AttributeProto::GRAPH, OPTIONAL_VALUE)
+                                .Attr("decoder", "Decoder subgraph to execute in a loop.", AttributeProto::GRAPH)
                                 .Input(0, "input_ids", "The sequence used as a prompt for the generation. Shape is (batch_size, sequence_length)", "I")
                                 .Input(1, "max_length", "The maximum length of the sequence to be generated. Shape is (1)", "I")
                                 .Input(2, "min_length", "The minimum length below which the score of eos_token_id is set to -Inf. Shape is (1)", "I", OpSchema::Optional)
@@ -950,8 +949,6 @@ ONNX_MS_OPERATOR_SET_SCHEMA(BeamSearch, 1,
                                 .TypeAndShapeInferenceFunction([](ONNX_NAMESPACE::InferenceContext& ctx) {
                                   BeamSearchShapeInference(ctx);
                                 }));
-
-
 
 ONNX_MS_OPERATOR_SET_SCHEMA(SampleOp, 1,
                             OpSchema()
@@ -1985,22 +1982,25 @@ void RegisterContribSchemas() {
             AttributeProto::INT, static_cast<int64_t>(ONNX_NAMESPACE::TensorProto_DataType_FLOAT))
       .AllowUncheckedAttributes()
       .Input(0, "X", "Input data tensor from the previous layer.", "T")
-      .Input(1, "Scale", "Scale tensor.", "T")
-      .Input(2, "B", "Bias tensor.", "T", OpSchema::Optional)
-      .Output(0, "Y", "Output data tensor.", "T")
+      .Input(1, "Scale", "Scale tensor.", "V")
+      .Input(2, "B", "Bias tensor.", "V", OpSchema::Optional)
+      .Output(0, "Y", "Output data tensor.", "V")
       .Output(1, "Mean", "Saved mean used during training to speed up gradient computation", "U", OpSchema::Optional)
       .Output(2, "InvStdDev", "Saved inverse standard deviation used during training to speed up gradient computation.", "U", OpSchema::Optional)
       .TypeConstraint(
           "T",
           {"tensor(float16)", "tensor(float)", "tensor(double)", "tensor(bfloat16)"},
-          "Constrain input types and output Y type to float tensors.")
+          "Constrain input X type to float tensors.")
       .TypeConstraint(
           "U",
-          {"tensor(float)", "tensor(bfloat16)"},
+          {"tensor(float)", "tensor(double)"},
           "Type of Mean and InvStdDev tensors.")
+      .TypeConstraint(
+          "V",
+          {"tensor(float16)", "tensor(float)", "tensor(double)", "tensor(bfloat16)"},
+          "Constrain output Y, scale and bias type to float tensors.")
       .TypeAndShapeInferenceFunction([](ONNX_NAMESPACE::InferenceContext& ctx) {
-        propagateShapeAndTypeFromFirstInput(ctx);
-        propagateElemTypeFromInputToOutput(ctx, 0, 0);
+        propagateElemTypeFromInputToOutput(ctx, 1, 0);
         auto type = ctx.getAttribute("stash_type")->i();
         if (ctx.getNumOutputs() > 1) {
           auto output_type = ctx.getOutputType(1);
@@ -2013,6 +2013,7 @@ void RegisterContribSchemas() {
         if (!hasNInputShapes(ctx, 1)) {
           return;
         }
+        propagateShapeFromInputToOutput(ctx, 0, 0);
         auto& input_shape = ctx.getInputType(0)->tensor_type().shape();
         int64_t input_ndim = input_shape.dim_size();
         int64_t axis = -1;
@@ -2042,14 +2043,14 @@ void RegisterContribSchemas() {
           [](const FunctionBodyBuildContext& ctx, const OpSchema& schema, FunctionProto& functionProto) {
             // LayerNormalization <axis, epsilon, stash_type> (X, Scale, B) => (Y, Mean?, InvStdDev?)
 
-            auto* tp = ctx.getInputType(0);
+            auto* tp = ctx.getInputType(1);
             if ((tp == nullptr) || (!tp->has_tensor_type()))
               return false;
-            int64_t T = tp->tensor_type().elem_type();
+            int64_t V = tp->tensor_type().elem_type();
 
             auto type_attr = ctx.getAttribute("stash_type");
             int64_t U = (type_attr != nullptr) ? type_attr->i() : static_cast<int64_t>(ONNX_NAMESPACE::TensorProto_DataType_FLOAT);
-            if ((U != ONNX_NAMESPACE::TensorProto_DataType_FLOAT) && (U != ONNX_NAMESPACE::TensorProto_DataType_BFLOAT16))
+            if ((U != ONNX_NAMESPACE::TensorProto_DataType_FLOAT) && (U != ONNX_NAMESPACE::TensorProto_DataType_DOUBLE))
               return false;  // Error
 
             auto* axis_attr = ctx.getAttribute("axis");
@@ -2073,7 +2074,7 @@ void RegisterContribSchemas() {
             FunctionBuilder builder(functionProto);
             builder
                 .AddOpset("", 13)
-                .Const("Epsilon", epsilon, U)
+                .Const("Epsilon", ToTensor(epsilon, (TensorProto_DataType)U))
                 .Add("XShape = Shape (X)")                                                    // shape of input tensor: 1D tensor
                 .Add("Rank = Size (XShape)")                                                  // rank of input tensor: scalar
                 .Add("Zero1D = Constant()", "value", mktensor(0))                             // [0] : 1D tensor
@@ -2095,9 +2096,9 @@ void RegisterContribSchemas() {
                 .Add("StdDev = Sqrt (VarPlusEpsilon)")
                 .Add("Deviation = Sub (XU, Mean2D)")
                 .Add("Normalized = Div (Deviation, StdDev)")
-                .Add("NormalizedT = Cast (Normalized)", "to", T)
+                .Add("NormalizedV = Cast (Normalized)", "to", V)
                 .Add("Scale2D = Flatten <axis = 0> (Scale)")
-                .Add("Scaled = Mul (NormalizedT, Scale2D)");
+                .Add("Scaled = Mul (NormalizedV, Scale2D)");
             if (ctx.hasInput(2)) {
               builder.Add("B2D = Flatten <axis=0> (B)");
               builder.Add("Biased = Add (Scaled, B2D)");
@@ -2126,25 +2127,37 @@ void RegisterContribSchemas() {
       .Attr("epsilon",
             "The epsilon value to use to avoid division by zero.",
             AttributeProto::FLOAT, 1e-5f)
+      .Attr("stash_type",
+            "type used for stash mean/inv_std_var",
+            AttributeProto::INT, static_cast<int64_t>(ONNX_NAMESPACE::TensorProto_DataType_FLOAT))
       .AllowUncheckedAttributes()
       .Input(0, "X", "Input data tensor from the previous layer.", "T")
-      .Input(1, "scale", "Scale tensor.", "T")
-      .Output(0, "Y", "Output data tensor.", "T")
+      .Input(1, "scale", "Scale tensor.", "V")
+      .Output(0, "Y", "Output data tensor.", "V")
       .Output(1, "inv_std_var", "Saved inverse standard variance used during training to speed up gradient computation.", "U", OpSchema::Optional)
       .TypeConstraint(
           "T",
           {"tensor(float16)", "tensor(float)", "tensor(double)", "tensor(bfloat16)"},
-          "Constrain input and output types (except mean and inv_std_var) to float tensors.")
+          "Constrain input X type to float tensors.")
       .TypeConstraint(
           "U",
-          {"tensor(float)"},
+          {"tensor(float)", "tensor(double)"},
           "Constrain mean and inv_std_var to be float tensors.")
+      .TypeConstraint(
+          "V",
+          {"tensor(float16)", "tensor(float)", "tensor(double)", "tensor(bfloat16)"},
+          "Constrain output Y and scale type to float tensors.")
       .TypeAndShapeInferenceFunction([](ONNX_NAMESPACE::InferenceContext& ctx) {
-        propagateShapeAndTypeFromFirstInput(ctx);
-        propagateElemTypeFromInputToOutput(ctx, 0, 0);
+        propagateElemTypeFromInputToOutput(ctx, 1, 0);
+        auto type = ctx.getAttribute("stash_type")->i();
+        if (ctx.getNumOutputs() > 1) {
+          auto output_type = ctx.getOutputType(1);
+          output_type->mutable_tensor_type()->set_elem_type(static_cast<int32_t>(type));
+        }
         if (!hasNInputShapes(ctx, 1)) {
           return;
         }
+        propagateShapeFromInputToOutput(ctx, 0, 0);
         auto& input_shape = ctx.getInputType(0)->tensor_type().shape();
         int64_t input_ndim = input_shape.dim_size();
         int64_t axis = -1;

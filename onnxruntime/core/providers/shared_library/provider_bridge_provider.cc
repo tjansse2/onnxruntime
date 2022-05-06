@@ -291,17 +291,11 @@ std::vector<std::unique_ptr<ComputeCapability>> IExecutionProvider::GetCapabilit
                                                                                   const std::vector<const KernelRegistry*>& kernel_registries) const {
   return g_host->IExecutionProvider__GetCapability(this, graph_viewer, kernel_registries);
 }
-
+// !!! This API will be deprecated soon.
 common::Status IExecutionProvider::Compile(const std::vector<onnxruntime::Node*>& fused_nodes,
                                            std::vector<NodeComputeInfo>& node_compute_funcs) {
   return g_host->IExecutionProvider__Compile(this, fused_nodes, node_compute_funcs);
 }
-
-common::Status IExecutionProvider::Compile(const std::vector<onnxruntime::Node*>& fused_nodes,
-                                           std::string& dll_path) {
-  return g_host->IExecutionProvider__Compile(this, fused_nodes, dll_path);
-}
-
 common::Status IExecutionProvider::Compile(const std::vector<FusedNodeAndGraph>& fused_nodes_and_graphs,
                                            std::vector<NodeComputeInfo>& node_compute_funcs) {
   return g_host->IExecutionProvider__Compile(this, fused_nodes_and_graphs, node_compute_funcs);
@@ -347,10 +341,10 @@ std::string GetEnvironmentVar(const std::string& var_name) {
   return g_host->GetEnvironmentVar(var_name);
 }
 
-InlinedHashSet<NodeIndex> GetCpuPreferredNodes(const onnxruntime::GraphViewer& graph,
-                                               const std::string& provider_type,
-                                               gsl::span<const KernelRegistry* const> kernel_registries,
-                                               gsl::span<const NodeIndex> tentative_nodes) {
+std::unordered_set<NodeIndex> GetCpuPreferredNodes(const onnxruntime::GraphViewer& graph,
+                                                   const std::string& provider_type,
+                                                   gsl::span<const KernelRegistry* const> kernel_registries,
+                                                   gsl::span<const NodeIndex> tentative_nodes) {
   return g_host->GetCpuPreferredNodes(graph, provider_type, kernel_registries, tentative_nodes);
 }
 
@@ -509,7 +503,7 @@ Status SplitBase::PrepareForCompute(const TensorShape& input_shape, int num_outp
 
 Status Size::Compute(OpKernelContext* context) const { return g_host_cpu.Size__Compute(this, context); }
 
-Status ScatterNDBase::ValidateShapes(const TensorShape& input_shape,
+Status ScatterND::ValidateShapes(const TensorShape& input_shape,
                                      const TensorShape& indice_shape,
                                      const TensorShape& update_shape) { return g_host_cpu.ScatterNDBase__ValidateShapes(input_shape, indice_shape, update_shape); }
 

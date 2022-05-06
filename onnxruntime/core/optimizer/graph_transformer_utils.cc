@@ -4,9 +4,15 @@
 #include "core/optimizer/graph_transformer_utils.h"
 
 #include <algorithm>
+#include <variant>
 
+#include "core/optimizer/conv_activation_fusion.h"
+#include "core/optimizer/nhwc_transformer.h"
+#include "core/optimizer/qdq_transformer/qdq_final_cleanup.h"
 #include "core/optimizer/qdq_transformer/selectors_actions/qdq_selector_action_transformer.h"
+#include "core/optimizer/selectors_actions/selector_action_transformer_apply_contexts.h"
 #include "core/session/onnxruntime_session_options_config_keys.h"
+#include "core/optimizer/conv_add_act_fusion.h"
 
 #if !defined(ORT_MINIMAL_BUILD)
 
@@ -18,7 +24,6 @@
 #include "core/optimizer/cast_elimination.h"
 #include "core/optimizer/common_subexpression_elimination.h"
 #include "core/optimizer/constant_folding.h"
-#include "core/optimizer/conv_activation_fusion.h"
 #include "core/optimizer/conv_add_fusion.h"
 #include "core/optimizer/conv_bn_fusion.h"
 #include "core/optimizer/conv_mul_fusion.h"
@@ -41,11 +46,9 @@
 #include "core/optimizer/matmul_scale_fusion.h"
 #include "core/optimizer/matmul_transpose_fusion.h"
 #include "core/optimizer/nchwc_transformer.h"
-#include "core/optimizer/nhwc_transformer.h"
 #include "core/optimizer/noop_elimination.h"
 #include "core/optimizer/not_where_fusion.h"
 #include "core/optimizer/qdq_transformer/clip_quantizelinear.h"
-#include "core/optimizer/qdq_transformer/qdq_final_cleanup.h"
 #include "core/optimizer/qdq_transformer/qdq_propagation.h"
 #include "core/optimizer/qdq_transformer/qdq_s8_to_u8.h"
 #include "core/optimizer/qdq_transformer/relu_quantizelinear.h"
@@ -159,13 +162,9 @@ InlinedVector<std::unique_ptr<GraphTransformer>> GenerateTransformers(
   InlinedVector<std::unique_ptr<GraphTransformer>> transformers;
   const bool disable_quant_qdq =
       session_options.config_options.GetConfigOrDefault(kOrtSessionOptionsDisableQuantQDQ, "0") == "1";
-  const bool enable_quant_qdq_cleanup =
-      session_options.config_options.GetConfigOrDefault(kOrtSessionOptionsEnableQuantQDQCleanup, "0") == "1";
 #ifndef DISABLE_CONTRIB_OPS
-  const bool enable_gelu_approximation =
-      session_options.config_options.GetConfigOrDefault(kOrtSessionOptionsEnableGeluApproximation, "0") == "1";
+  const InlinedHashSet<std::string_view> cpu_ep = {onnxruntime::kCpuExecutionProvider};
 #endif
-
   switch (level) {
     case TransformerLevel::Level1: {
       // RewriteRule optimizations are the simplest (they generally remove unnecessary nodes and are cheap to run)
@@ -193,9 +192,15 @@ InlinedVector<std::unique_ptr<GraphTransformer>> GenerateTransformers(
     } break;
 
     case TransformerLevel::Level2: {
-      const InlinedHashSet<std::string_view> cpu_ep = {onnxruntime::kCpuExecutionProvider};
-
+      const bool enable_quant_qdq_cleanup =
+          session_options.config_options.GetConfigOrDefault(kOrtSessionOptionsEnableQuantQDQCleanup, "0") == "1";
 #ifndef DISABLE_CONTRIB_OPS
+      const bool qdq_is_int8_allowed =
+          session_options.config_options.GetConfigOrDefault(kOrtSessionOptionsQDQIsInt8Allowed,
+                                                            QDQIsInt8Allowed() ? "1" : "0") == "1";
+      const bool enable_gelu_approximation =
+          session_options.config_options.GetConfigOrDefault(kOrtSessionOptionsEnableGeluApproximation, "0") == "1";
+
       const InlinedHashSet<std::string_view> cuda_rocm_eps = {onnxruntime::kCudaExecutionProvider,
                                                               onnxruntime::kRocmExecutionProvider};
       const InlinedHashSet<std::string_view> cpu_cuda_rocm_eps = {onnxruntime::kCpuExecutionProvider,
@@ -208,10 +213,13 @@ InlinedVector<std::unique_ptr<GraphTransformer>> GenerateTransformers(
                                                                             onnxruntime::kArmNNExecutionProvider};
 
       if (!disable_quant_qdq) {
-        if (!QDQIsInt8Allowed()) {
+        // currently we don't support QDQS8ToU8Transformer in a minimal build and if supported, this needs to run in
+        // Level 1 during export and not Level 2 at runtime as it would result in overlapping optimizations which
+        // runtime optimization does not support, so add session config value here to force qdqisint8allowed to be true.
+        if (!qdq_is_int8_allowed) {
           transformers.emplace_back(std::make_unique<QDQS8ToU8Transformer>(cpu_ep));
         }
-        transformers.emplace_back(std::make_unique<QDQSelectorActionTransformer>());
+        transformers.emplace_back(std::make_unique<QDQSelectorActionTransformer>(qdq_is_int8_allowed));
       }
 
       transformers.emplace_back(std::make_unique<GemmActivationFusion>(cpu_ep));
@@ -244,9 +252,9 @@ InlinedVector<std::unique_ptr<GraphTransformer>> GenerateTransformers(
       }
 
 #endif
-      if (enable_quant_qdq_cleanup) {
-        transformers.emplace_back(std::make_unique<QDQFinalCleanupTransformer>());
-      }
+      // The QDQFinalCleanupTransformer must run AFTER other transformers that fuse Q/DQ nodes. Otherwise, their
+      // fusions might be prevented if this one removes a Q/DQ node too early.
+      transformers.emplace_back(std::make_unique<QDQFinalCleanupTransformer>(enable_quant_qdq_cleanup));
     } break;
 
     case TransformerLevel::Level3: {
@@ -257,6 +265,12 @@ InlinedVector<std::unique_ptr<GraphTransformer>> GenerateTransformers(
       }
       auto cpu_allocator = cpu_execution_provider.GetAllocator(0, OrtMemTypeDefault);
       transformers.emplace_back(std::make_unique<NhwcTransformer>(std::move(cpu_allocator)));
+      // NCHWCtransformer should have a higher priority versus this. Because NCHWCtransformer also do the similiar things
+      // of fusion patterns and target on CPU. However, NCHWCtransformer will reorder the layout to nchwc which is only available for
+      // x86-64 cpu, not edge cpu like arm. But This tranformer could be used by opencl-ep/cpu-ep. So
+      // we will prefer NhwcTransformer once ort runs on x86-64 CPU, otherwise ConvAddActivationFusion is enabled.
+      // this PR #6351 implemented similiar fusion-pattern but only for CUDA, and can only fuse conv-add-relu, while we can fuse more activation.
+      transformers.emplace_back(std::make_unique<ConvAddActivationFusion>(cpu_ep));
 #endif
     } break;
 
@@ -271,28 +285,61 @@ InlinedVector<std::unique_ptr<GraphTransformer>> GenerateTransformers(
 
 #endif  // !defined(ORT_MINIMAL_BUILD)
 
-#if !defined(ORT_MINIMAL_BUILD) || defined(ORT_ENABLE_RUNTIME_OPTIMIZATION_IN_MINIMAL_BUILD)
+#if !defined(ORT_MINIMAL_BUILD) || defined(ORT_EXTENDED_MINIMAL_BUILD)
 
-InlinedVector<std::unique_ptr<GraphTransformer>> GenerateTransformersForRuntimeOptimizations(
+InlinedVector<std::unique_ptr<GraphTransformer>> GenerateTransformersForMinimalBuild(
     TransformerLevel level,
     const SessionOptions& session_options,
     const SatApplyContextVariant& apply_context,
+    const IExecutionProvider& cpu_execution_provider,
     const InlinedHashSet<std::string>& rules_and_transformers_to_disable) {
-  const bool disable_quant_qdq =
-      session_options.config_options.GetConfigOrDefault(kOrtSessionOptionsDisableQuantQDQ, "0") == "1";
-
   InlinedVector<std::unique_ptr<GraphTransformer>> transformers;
+  const bool saving = std::holds_alternative<SatRuntimeOptimizationSaveContext>(apply_context);
 
   switch (level) {
     case TransformerLevel::Level1:
       break;
-    case TransformerLevel::Level2:
+    case TransformerLevel::Level2: {
+#if !defined(DISABLE_CONTRIB_OPS)
+      const bool disable_quant_qdq =
+          session_options.config_options.GetConfigOrDefault(kOrtSessionOptionsDisableQuantQDQ, "0") == "1";
+      const bool qdq_is_int8_allowed =
+          session_options.config_options.GetConfigOrDefault(kOrtSessionOptionsQDQIsInt8Allowed,
+                                                            QDQIsInt8Allowed() ? "1" : "0") == "1";
+
+      // runtime optimizations only support CPU EP now
+      const InlinedHashSet<std::string_view> cpu_ep = {onnxruntime::kCpuExecutionProvider};
+
       if (!disable_quant_qdq) {
-        transformers.emplace_back(std::make_unique<QDQSelectorActionTransformer>(apply_context));
+        transformers.emplace_back(std::make_unique<QDQSelectorActionTransformer>(qdq_is_int8_allowed, apply_context));
       }
+
+      transformers.emplace_back(std::make_unique<ConvActivationFusion>(cpu_ep, apply_context));
+#else   // !defined(DISABLE_CONTRIB_OPS)
+      ORT_UNUSED_PARAMETER(apply_context);
+#endif  // !defined(DISABLE_CONTRIB_OPS)
+
+      if (!saving) {
+        const bool enable_quant_qdq_cleanup =
+            session_options.config_options.GetConfigOrDefault(kOrtSessionOptionsEnableQuantQDQCleanup, "0") == "1";
+        // The QDQFinalCleanupTransformer must run AFTER other transformers that fuse Q/DQ nodes. Otherwise, their
+        // fusions might be prevented if this one removes a Q/DQ node too early.
+        transformers.emplace_back(std::make_unique<QDQFinalCleanupTransformer>(enable_quant_qdq_cleanup));
+      }
+
       break;
-    case TransformerLevel::Level3:
-      break;
+    }
+    case TransformerLevel::Level3: {
+      // currently the only level 3 optimizer is the NhwcTransformer which is fully supported at runtime
+      if (!saving) {
+#ifndef DISABLE_CONTRIB_OPS
+        auto cpu_allocator = cpu_execution_provider.GetAllocator(0, OrtMemTypeDefault);
+        transformers.emplace_back(std::make_unique<NhwcTransformer>(std::move(cpu_allocator)));
+#else
+        ORT_UNUSED_PARAMETER(cpu_execution_provider);
+#endif
+      }
+    } break;
     default:
       ORT_THROW("Unsupported optimization level: ", static_cast<int>(level));
   }
@@ -302,6 +349,6 @@ InlinedVector<std::unique_ptr<GraphTransformer>> GenerateTransformersForRuntimeO
   return transformers;
 }
 
-#endif  // !defined(ORT_MINIMAL_BUILD) || defined(ORT_ENABLE_RUNTIME_OPTIMIZATION_IN_MINIMAL_BUILD)
+#endif  // !defined(ORT_MINIMAL_BUILD) || defined(ORT_EXTENDED_MINIMAL_BUILD)
 
 }  // namespace onnxruntime::optimizer_utils

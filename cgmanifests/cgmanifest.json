@@ -4,7 +4,7 @@
          "component": {
             "type": "git",
             "git": {
-               "commitHash": "9336be04a242237cd41a525bedfcf3be1bb55377",
+               "commitHash": "215105818dfde3174fe799600bb0f3cae233d0bf",
                "repositoryUrl": "https://github.com/abseil/abseil-cpp.git"
             }
          }
@@ -46,7 +46,7 @@
          "component": {
             "type": "git",
             "git": {
-               "commitHash": "36b48a5707321adba8a70e14da443566a9391e5a",
+               "commitHash": "fafabc96c1ba1a5f987c2402fcc2ce4d1bad5cc8",
                "repositoryUrl": "https://github.com/apache/tvm.git"
             },
             "comments": "needed for TVM EP"

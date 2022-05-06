@@ -261,7 +261,7 @@ static std::string ExportToOnnx(
   // Retrieve Python exporter function.
   pybind11::function export_to_onnx =
       pybind11::reinterpret_borrow<pybind11::function>(
-          pybind11::module::import("torch.onnx.utils").attr("_export_jit_graph_to_onnx_model_proto"));
+          pybind11::module::import("onnxruntime.training.experimental.exporter").attr("_export_jit_graph_to_onnx_model_proto"));
   // Fill types up. The sub-graphp from LazyTensor doesn't
   // contain input shapes.
   PropagateArgTypes(args, new_subgraph);
