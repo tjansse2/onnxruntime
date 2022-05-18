@@ -26,4 +26,4 @@ docker run --rm \
         --enable_lto \
         --build_wheel \
         --enable_onnx_tests \
-        "$build_py_parameters"
+        $build_py_parameters
