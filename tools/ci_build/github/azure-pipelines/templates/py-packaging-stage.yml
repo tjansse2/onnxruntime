@@ -79,29 +79,11 @@ stages:
           DockerBuildArgs: "--build-arg BUILD_UID=$( id -u )"
           Repository: onnxruntimecpubuild
 
-      - task: CmdLine@2
+      - task: Bash@3
         displayName: 'Build Python Wheel'
         inputs:
-          script: |
-            mkdir -p $HOME/.onnx
-            docker run --rm \
-              --volume /data/onnx:/data/onnx:ro \
-              --volume $(Build.SourcesDirectory):/onnxruntime_src \
-              --volume $(Build.BinariesDirectory):/build \
-              --volume /data/models:/build/models:ro \
-              --volume $HOME/.onnx:/home/onnxruntimedev/.onnx \
-              -e NIGHTLY_BUILD \
-              -e BUILD_BUILDNUMBER \
-              onnxruntimecpubuild \
-                $(PythonManylinuxDir)/bin/python3 /onnxruntime_src/tools/ci_build/build.py \
-                  --build_dir /build --cmake_generator Ninja \
-                  --config Release --update --build \
-                  --skip_submodule_sync \
-                  --parallel \
-                  --enable_lto \
-                  --build_wheel \
-                  --enable_onnx_tests \
-                  ${{ parameters.build_py_parameters }}
+          filePath: tools/ci_build/github/azure-pipelines/scripts/build_linuxwheel.sh
+          arguments: ["$HOME/.onnx", "$(Build.SourcesDirectory)", "$(Build.BinariesDirectory)", "$(PythonManyLinuxDir)", "${{ parameters.build_py_parameters}}"]
           workingDirectory: $(Build.SourcesDirectory)
 
       - task: CmdLine@2
@@ -624,7 +606,7 @@ stages:
           Contents: '*.whl'
           TargetFolder: '$(Build.ArtifactStagingDirectory)'
 
- 
+
       - task: PublishBuildArtifacts@1
         displayName: 'Publish Artifact: ONNXRuntime python wheel'
         inputs:
