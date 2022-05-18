@@ -83,7 +83,7 @@ stages:
         displayName: 'Build Python Wheel'
         inputs:
           filePath: tools/ci_build/github/azure-pipelines/scripts/build_linuxwheel.sh
-          arguments: ["$HOME/.onnx", "$(Build.SourcesDirectory)", "$(Build.BinariesDirectory)", "$(PythonManyLinuxDir)", "${{ parameters.build_py_parameters}}"]
+          arguments: "$HOME/.onnx $(Build.SourcesDirectory) $(Build.BinariesDirectory) $(PythonManyLinuxDir) ${{ parameters.build_py_parameters}}"
           workingDirectory: $(Build.SourcesDirectory)
 
       - task: CmdLine@2
