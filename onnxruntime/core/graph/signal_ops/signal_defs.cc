@@ -325,8 +325,6 @@ void RegisterSignalSchemas() {
           "Constrain scalar length types to int64_t.")
       .TypeAndShapeInferenceFunction([](ONNX_NAMESPACE::InferenceContext& ctx) {
         propagateElemTypeFromInputToOutput(ctx, 0, 0);
-        const int64_t batch_ndim = 1;
-
         auto& input_shape = getInputShape(ctx, 0);
         ONNX_NAMESPACE::TensorShapeProto result_shape = input_shape;
         auto dim_size = static_cast<int64_t>(input_shape.dim_size());
@@ -458,7 +456,7 @@ void RegisterSignalSchemas() {
 
         const ONNX_NAMESPACE::TensorShapeProto* window_shape = nullptr;
         if (ctx.getNumInputs() >= 3) {
-          window_shape = getOptionalInputShape(ctx, 2);
+          window_shape = ONNX_NAMESPACE::getOptionalInputShape(ctx, 2);
         } else {
           window_shape = nullptr;
         }
@@ -629,7 +627,7 @@ void RegisterSignalSchemas() {
         }
         )ONNX");
 
-  static const char* MelWeightMatrix_ver17_doc = R"DOC(
+  static const char* MelWeightMatrix_doc = R"DOC(
 Generate a MelWeightMatrix that can be used to re-weight a Tensor containing a linearly sampled frequency spectra (from DFT or STFT) into num_mel_bins frequency information based on the [lower_edge_hertz, upper_edge_hertz] range on the mel scale.
 This function defines the mel scale in terms of a frequency in hertz according to the following formula:
 
@@ -643,7 +641,7 @@ The returned MelWeightMatrix can be used to right-multiply a spectrogram S of sh
   MS_SIGNAL_OPERATOR_SCHEMA(MelWeightMatrix)
       .SetDomain(kMSExperimentalDomain)
       .SinceVersion(1)
-      .SetDoc(R"DOC(MelWeightMatrix)DOC")
+      .SetDoc(MelWeightMatrix_doc)
       .Attr("output_datatype",
             "The data type of the output tensor. "
             "Strictly must be one of the types from DataType enum in TensorProto.",
