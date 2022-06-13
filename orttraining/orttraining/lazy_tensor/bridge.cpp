@@ -8,28 +8,28 @@ namespace lazytensor {
 c10::ScalarType CreateC10ScalarType(const onnxruntime::PrimitiveDataTypeBase* elem_type) {
   ORT_ENFORCE(elem_type, "Element type pointer cannot be NULL.");
   switch (static_cast<ONNX_NAMESPACE::TensorProto_DataType>(elem_type->GetDataType())) {
-    case onnxruntime::data_types_internal::ToTensorDataType<float>(): {
+    case onnxruntime::utils::ToTensorProtoElementType<float>(): {
       return c10::kFloat;
     }
-    case onnxruntime::data_types_internal::ToTensorDataType<double>(): {
+    case onnxruntime::utils::ToTensorProtoElementType<double>(): {
       return c10::kDouble;
     }
-    case onnxruntime::data_types_internal::ToTensorDataType<onnxruntime::MLFloat16>(): {
+    case onnxruntime::utils::ToTensorProtoElementType<onnxruntime::MLFloat16>(): {
       return at::kHalf;
     }
-    case onnxruntime::data_types_internal::ToTensorDataType<onnxruntime::BFloat16>(): {
+    case onnxruntime::utils::ToTensorProtoElementType<onnxruntime::BFloat16>(): {
       return c10::kBFloat16;
     }
-    case onnxruntime::data_types_internal::ToTensorDataType<bool>(): {
+    case onnxruntime::utils::ToTensorProtoElementType<bool>(): {
       return at::kBool;
     }
-    case onnxruntime::data_types_internal::ToTensorDataType<int16_t>(): {
+    case onnxruntime::utils::ToTensorProtoElementType<int16_t>(): {
       return at::kShort;
     }
-    case onnxruntime::data_types_internal::ToTensorDataType<int>(): {
+    case onnxruntime::utils::ToTensorProtoElementType<int>(): {
       return at::kInt;
     }
-    case onnxruntime::data_types_internal::ToTensorDataType<int64_t>(): {
+    case onnxruntime::utils::ToTensorProtoElementType<int64_t>(): {
       return at::kLong;
     }
     default:
@@ -279,52 +279,52 @@ c10::IValue CreateC10IvalueScalar(OrtValue value) {
   c10::IValue new_value;
   ORT_ENFORCE(tensor->Location().device.Type() == OrtDevice::CPU);
   switch (static_cast<ONNX_NAMESPACE::TensorProto_DataType>(tensor->DataType()->AsPrimitiveDataType()->GetDataType())) {
-    case onnxruntime::data_types_internal::ToTensorDataType<float>(): {
+    case onnxruntime::utils::ToTensorProtoElementType<float>(): {
       //auto s = at::Scalar(*tensor->Data<float>());
       //new_value = at::scalar_tensor(s, at::kFloat);
       //new_value = at::Scalar(*tensor->Data<float>());
       new_value = at::IValue(static_cast<double>(*tensor->Data<float>()));
       break;
     }
-    case onnxruntime::data_types_internal::ToTensorDataType<double>(): {
+    case onnxruntime::utils::ToTensorProtoElementType<double>(): {
       //auto s = at::Scalar(*tensor->Data<double>());
       //new_value = at::scalar_tensor(s, at::kDouble);
       //new_value = at::Scalar(*tensor->Data<double>());
       new_value = at::IValue(*tensor->Data<double>());
       break;
     }
-    //case onnxruntime::data_types_internal::ToTensorDataType<onnxruntime::MLFloat16>(): {
+    //case onnxruntime::utils::ToTensorProtoElementType<onnxruntime::MLFloat16>(): {
     //  //auto s = at::Scalar(*reinterpret_cast<const at::Half*>(tensor->DataRaw()));
     //  //new_value = at::scalar_tensor(s, at::kHalf);
     //  new_value = at::Scalar(*reinterpret_cast<const at::Half*>(tensor->DataRaw()));
     //  break;
     //}
-    //case onnxruntime::data_types_internal::ToTensorDataType<onnxruntime::BFloat16>(): {
+    //case onnxruntime::utils::ToTensorProtoElementType<onnxruntime::BFloat16>(): {
     //  //auto s = at::Scalar(*reinterpret_cast<const at::BFloat16*>(tensor->DataRaw()));
     //  //new_value = at::scalar_tensor(s, at::kBFloat16);
     //  new_value = at::Scalar(*reinterpret_cast<const at::BFloat16*>(tensor->DataRaw()));
     //  break;
     //}
-    case onnxruntime::data_types_internal::ToTensorDataType<bool>(): {
+    case onnxruntime::utils::ToTensorProtoElementType<bool>(): {
       //auto s = at::Scalar(*reinterpret_cast<const bool*>(tensor->DataRaw()));
       //new_value = at::scalar_tensor(s, at::kBool);
       //new_value = at::Scalar(*reinterpret_cast<const bool*>(tensor->DataRaw()));
       new_value = at::IValue(*tensor->Data<bool>());
       break;
     }
-    //case onnxruntime::data_types_internal::ToTensorDataType<int16_t>(): {
+    //case onnxruntime::utils::ToTensorProtoElementType<int16_t>(): {
     //  //auto s = at::Scalar(*reinterpret_cast<const int16_t*>(tensor->DataRaw()));
     //  //new_value = at::scalar_tensor(s, at::kShort);
     //  new_value = at::Scalar(*reinterpret_cast<const int16_t*>(tensor->DataRaw()));
     //  break;
     //}
-    //case onnxruntime::data_types_internal::ToTensorDataType<int>(): {
+    //case onnxruntime::utils::ToTensorProtoElementType<int>(): {
     //  //auto s = at::Scalar(*reinterpret_cast<const int*>(tensor->DataRaw()));
     //  //new_value = at::scalar_tensor(s, at::kInt);
     //  new_value = at::Scalar(*reinterpret_cast<const int*>(tensor->DataRaw()));
     //  break;
     //}
-    case onnxruntime::data_types_internal::ToTensorDataType<int64_t>(): {
+    case onnxruntime::utils::ToTensorProtoElementType<int64_t>(): {
       //auto s = at::Scalar(*reinterpret_cast<const int64_t*>(tensor->DataRaw()));
       //new_value = at::scalar_tensor(s, at::kLong);
       //new_value = at::Scalar(*reinterpret_cast<const int64_t*>(tensor->DataRaw()));
