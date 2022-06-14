@@ -55,9 +55,13 @@ Module::Module(const std::string& train_model_path_or_bytes,
                std::unordered_map<std::string, std::shared_ptr<Parameter>>& named_parameters,
                const onnxruntime::SessionOptions& session_options,
                const Environment& env,
-               const std::optional<std::string>& eval_model_path_or_bytes) {
+               const std::optional<std::string>& eval_model_path_or_bytes,
+               const std::vector<std::shared_ptr<IExecutionProvider>>& providers) {
   train_sess_ = std::make_unique<onnxruntime::InferenceSession>(session_options, env);
   ORT_THROW_IF_ERROR(train_sess_->Load(train_model_path_or_bytes));
+  for (const auto& provider : providers) {
+    ORT_THROW_IF_ERROR(train_sess_->RegisterExecutionProvider(provider));
+  }
   ORT_THROW_IF_ERROR(train_sess_->Initialize());
 
   utils::GetGraphInputOutputNames(train_sess_, train_input_names_, train_output_names_);

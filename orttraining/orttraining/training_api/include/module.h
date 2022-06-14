@@ -61,7 +61,7 @@ struct Module {
          std::unordered_map<std::string, std::shared_ptr<Parameter>>& named_parameters,
          const onnxruntime::SessionOptions& session_options,
          const Environment& env,
-         const std::optional<std::string>& eval_model_path_or_bytes = std::nullopt);
+         const std::optional<std::string>& eval_model_path_or_bytes = std::nullopt, const std::vector<std::shared_ptr<IExecutionProvider>>& providers = {});
 
   // Return the trainable/nontrainable parameters
   std::vector<std::shared_ptr<Parameter>> Parameters() const;
