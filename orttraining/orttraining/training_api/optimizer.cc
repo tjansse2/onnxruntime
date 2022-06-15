@@ -155,7 +155,10 @@ Optimizer::Optimizer(const std::string& optim_path_or_bytes,
 Status Optimizer::Step() {
   OrtValue learning_rate_input, step_input;
   utils::WarpInOrtValue<float>(optimizer_state_.learning_rate, &learning_rate_input);
-  utils::WarpInOrtValue<int64_t>(optimizer_state_.step, &step_input);
+  // Use step count + 1 before running optimizer step.
+  // This is necessary since bias correction uses the step
+  // as a power. Using power of 0 is wrong.
+  utils::WarpInOrtValue<int64_t>(optimizer_state_.step + 1, &step_input);
   std::vector<OrtValue> feeds({learning_rate_input, step_input});
   feeds.insert(feeds.end(), inputs_.begin(), inputs_.end());
 
@@ -164,8 +167,9 @@ Status Optimizer::Step() {
   ORT_THROW_IF_ERROR(status);
 
   // extract step output and update
-  if (utils::GetValue<int64_t>(outputs[0]) == 1LL)
+  if (utils::GetValue<int64_t>(outputs[0]) == 1LL) {
     optimizer_state_.step++;
+  }
 
   return Status::OK();
 }

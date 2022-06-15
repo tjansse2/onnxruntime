@@ -96,8 +96,6 @@ TEST(TrainingApiTest, ModuleTrainStep) {
   }
 }
 
-// TODO: enable this test once Set Execution Provider functionality is
-//       available.
 TEST(TrainingApiTest, OptimStep) {
   auto model_uri = MODEL_FOLDER "gradient_graph.onnx";
   auto optim_uri = MODEL_FOLDER "adamw.onnx";
@@ -122,54 +120,47 @@ TEST(TrainingApiTest, OptimStep) {
   auto data_loader = std::vector<std::vector<OrtValue>>(4, std::vector<OrtValue>{input, target});
 
   size_t step = 0;
-  // std::string param_name = "fc2.weight";
+  std::string param_name = "fc2.weight";
 
   // before training, check if optim state is initialized to 0
-  // OptimizerCheckpointState optimizer_states;
-  // ORT_ENFORCE(optim->GetStateDict(optimizer_states).IsOK());
-  // ParameterOptimizerState& param_state =
-  //     optimizer_states.group_named_optimizer_states["group0"]->param_named_optimizer_states.at(param_name);
-  // OrtValue& moment_1 = param_state.momentum_named_states.at("momentum0");
-  // ORT_ENFORCE(moment_1);
+  OptimizerCheckpointState optimizer_states;
+  ORT_ENFORCE(optim->GetStateDict(optimizer_states).IsOK());
+  ParameterOptimizerState& param_state =
+      optimizer_states.group_named_optimizer_states["group0"]->param_named_optimizer_states.at(param_name);
+  OrtValue& moment_1 = param_state.momentum_named_states.at("momentum0");
 
-  // auto print_vec = [](auto& vec) {
-  //   std::cerr << "[";
-  //   for (auto& val : vec) {
-  //     std::cerr << val << ", ";
-  //   }
-  //   std::cerr << "]\n";
-  // };
-
-  // std::vector<float> param_vec_before_optimizer_step;
-  // OrtValueToVec(model->NamedParameters().at(param_name)->Data(), param_vec_before_optimizer_step, cuda_provider, cpu_provider);
-  // std::vector<float> moment_1_vec;
-  // OrtValueToVec(moment_1, moment_1_vec, cuda_provider, cpu_provider);
-  // for (size_t i = 0; i < moment_1_vec.size(); i++) {
-  //   ORT_ENFORCE(moment_1_vec[i] == 0.0f);
-  // }
+  std::vector<float> param_vec_before_optimizer_step;
+  OrtValueToVec(model->NamedParameters().at(param_name)->Data(), param_vec_before_optimizer_step, cuda_provider, cpu_provider);
+  std::vector<float> moment_1_vec;
+  OrtValueToVec(moment_1, moment_1_vec, cuda_provider, cpu_provider);
+  for (size_t i = 0; i < moment_1_vec.size(); i++) {
+    ORT_ENFORCE(moment_1_vec[i] == 0.0f);
+  }
 
   for (auto it = data_loader.begin(); it != data_loader.end(); ++it) {
     step += 1;
     std::vector<OrtValue>& inputs = *it;
     std::vector<OrtValue> fetches;
     ORT_ENFORCE(model->TrainStep(inputs, fetches).IsOK());
-    // std::vector<float> gradient_vec_before_optimizer_step;
-    // OrtValueToVec(model->NamedParameters().at(param_name)->Gradient(), gradient_vec_before_optimizer_step, cuda_provider, cpu_provider);
-
-    // print_vec(gradient_vec_before_optimizer_step);
+    std::vector<float> grads;
+    OrtValueToVec(model->NamedParameters().at(param_name)->Gradient(), grads, cuda_provider, cpu_provider);
     ORT_ENFORCE(optim->Step().IsOK());
 
     // get optim state and check if it is updated
-    // OrtValueToVec(moment_1, moment_1_vec, cuda_provider, cpu_provider);
-    // for (size_t i = 0; i < moment_1_vec.size(); i++) {
-    //   ORT_ENFORCE(moment_1_vec[i] != 0.0f);
-    // }
+    OrtValueToVec(moment_1, moment_1_vec, cuda_provider, cpu_provider);
+    for (size_t i = 0; i < moment_1_vec.size(); i++) {
+      if (grads[i] != 0.0f) {
+        ORT_ENFORCE(moment_1_vec[i] != 0.0f);
+      }
+    }
 
-    // std::vector<float> param_vec_after_optimizer_step;
-    // OrtValueToVec(model->NamedParameters().at(param_name)->Data(), param_vec_after_optimizer_step, cuda_provider, cpu_provider);
-    // for (size_t i = 0; i < param_vec_after_optimizer_step.size(); ++i) {
-    //   ORT_ENFORCE(param_vec_after_optimizer_step[i] != param_vec_before_optimizer_step[i]);
-    // }
+    std::vector<float> param_vec_after_optimizer_step;
+    OrtValueToVec(model->NamedParameters().at(param_name)->Data(), param_vec_after_optimizer_step, cuda_provider, cpu_provider);
+    for (size_t i = 0; i < param_vec_after_optimizer_step.size(); ++i) {
+      if (grads[i] != 0.0f && moment_1_vec[i] != 0.0f) {
+        ORT_ENFORCE(param_vec_after_optimizer_step[i] != param_vec_before_optimizer_step[i]);
+      }
+    }
   }
 }
 
@@ -191,9 +182,10 @@ void TestLRSchduler(const std::string& test_file_name, float initial_lr, int64_t
   onnxruntime::SessionOptions session_option;
   std::unique_ptr<Environment> env;
   ORT_THROW_IF_ERROR(Environment::Create(nullptr, env));
+  std::shared_ptr<IExecutionProvider> cuda_provider = onnxruntime::test::DefaultCudaExecutionProvider();
   auto model = std::make_unique<Module>(model_uri, state.module_checkpoint_state.named_parameters, session_option,
-                                        *env);
-  auto optim = std::make_shared<Optimizer>(optim_uri, model->NamedParameters(), session_option, *env);
+                                        *env, std::nullopt, std::vector<std::shared_ptr<IExecutionProvider>>({cuda_provider}));
+  auto optim = std::make_shared<Optimizer>(optim_uri, model->NamedParameters(), session_option, *env, std::vector<std::shared_ptr<IExecutionProvider>>({cuda_provider}));
 
   OrtValue input, target;
   GenerateRandomInput(std::array<int64_t, 2>{2, 784}, input);
