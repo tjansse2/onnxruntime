@@ -11,6 +11,7 @@ def _export_jit_graph_to_onnx_model_proto(graph, operator_export_type):
     _set_onnx_shape_inference(True)
     _set_operator_export_type(operator_export_type)
     _set_opset_version(onnx_version)
+    torch._C._jit_pass_run_decompositions(graph)
     graph = torch.onnx.utils._optimize_graph(
         graph, operator_export_type, params_dict={})
     proto, _1, _2, _3 = graph._export_onnx(
