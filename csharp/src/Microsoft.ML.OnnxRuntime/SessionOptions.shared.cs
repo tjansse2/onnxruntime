@@ -4,7 +4,6 @@
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Collections.Generic;
 
 namespace Microsoft.ML.OnnxRuntime
 {
@@ -336,8 +335,8 @@ namespace Microsoft.ML.OnnxRuntime
             NativeApiStatus.VerifySuccess(
                 NativeMethods.OrtSessionOptionsAppendExecutionProvider_CoreML(handle, (uint)coremlFlags));
 #else
-#if !__ANDROID__
-            // the CoreML EP entry point is registered unless this is Android but is only valid if this is OSX
+#if __ENABLE_COREML__
+            // only attempt if this is OSX
             if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
             {
                 NativeApiStatus.VerifySuccess(

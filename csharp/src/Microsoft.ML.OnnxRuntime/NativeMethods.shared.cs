@@ -817,7 +817,9 @@ namespace Microsoft.ML.OnnxRuntime
 #if __ANDROID__
         [DllImport(NativeLib.DllName, CharSet = CharSet.Ansi)]
         public static extern IntPtr /*(OrtStatus*)*/ OrtSessionOptionsAppendExecutionProvider_Nnapi(IntPtr /*(OrtSessionOptions*)*/ options, uint nnapi_flags);
-#else
+#endif
+
+#if __ENABLE_COREML__
         // CoreML is available on iOS and macOS so we can't exclude based on __MOBILE__ && __IOS__
         [DllImport(NativeLib.DllName, CharSet = CharSet.Ansi)]
         public static extern IntPtr /*(OrtStatus*)*/ OrtSessionOptionsAppendExecutionProvider_CoreML(IntPtr /*(OrtSessionOptions*)*/ options, uint coreml_flags);
@@ -952,9 +954,9 @@ namespace Microsoft.ML.OnnxRuntime
 
         public static DOrtAddInitializer OrtAddInitializer;
 
-        #endregion
+#endregion
 
-        #region RunOptions API
+#region RunOptions API
 
         [UnmanagedFunctionPointer(CallingConvention.Winapi)]
         public delegate IntPtr /*(OrtStatus*)*/ DOrtCreateRunOptions(out IntPtr /* OrtRunOptions** */ runOptions);
@@ -998,9 +1000,9 @@ namespace Microsoft.ML.OnnxRuntime
         public delegate IntPtr /*(OrtStatus*)*/ DOrtRunOptionsUnsetTerminate(IntPtr /* OrtRunOptions* */ options);
         public static DOrtRunOptionsUnsetTerminate OrtRunOptionsUnsetTerminate;
 
-        #endregion
+#endregion
 
-        #region Allocator/MemoryInfo API
+#region Allocator/MemoryInfo API
 
         [UnmanagedFunctionPointer(CallingConvention.Winapi)]
         public delegate IntPtr /* (OrtStatus*)*/ DOrtCreateMemoryInfo(
@@ -1139,9 +1141,9 @@ namespace Microsoft.ML.OnnxRuntime
 
         public static DOrtAllocatorFree OrtAllocatorFree;
 
-        #endregion Allocator/MemoryInfo API
+#endregion Allocator/MemoryInfo API
 
-        #region IoBinding API
+#region IoBinding API
 
         /// <summary>
         /// Create OrtIoBinding instance that is used to bind memory that is allocated
@@ -1329,9 +1331,9 @@ namespace Microsoft.ML.OnnxRuntime
 
         public static DOrtSetLanguageProjection OrtSetLanguageProjection;
 
-        #endregion IoBinding API
+#endregion IoBinding API
 
-        #region ModelMetadata API
+#region ModelMetadata API
 
         /// <summary>
         /// Gets the ModelMetadata associated with an InferenceSession
@@ -1450,9 +1452,9 @@ namespace Microsoft.ML.OnnxRuntime
 
         public static DOrtReleaseModelMetadata OrtReleaseModelMetadata;
 
-        #endregion ModelMetadata API
+#endregion ModelMetadata API
 
-        #region Tensor/OnnxValue API
+#region Tensor/OnnxValue API
 
         [UnmanagedFunctionPointer(CallingConvention.Winapi)]
         public delegate IntPtr /*(OrtStatus*)*/ DOrtGetValue(IntPtr /*(OrtValue*)*/ value,
@@ -1609,9 +1611,9 @@ namespace Microsoft.ML.OnnxRuntime
 
         public static DOrtReleaseValue OrtReleaseValue;
 
-        #endregion
+#endregion
 
-        #region Misc API
+#region Misc API
 
         /// <summary>
         /// Queries all the execution providers supported in the native onnxruntime shared library
@@ -1651,7 +1653,7 @@ namespace Microsoft.ML.OnnxRuntime
 
         public static DOrtReleasePrepackedWeightsContainer OrtReleasePrepackedWeightsContainer;
 
-        #endregion
+#endregion
 
         public static byte[] GetPlatformSerializedString(string str)
         {
