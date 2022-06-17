@@ -330,15 +330,15 @@ jobs:
     OrtPackageId: ${{ parameters.OrtNugetPackageId }}
     breakCodesignValidationInjection: ${{ parameters.DoEsrp }}
   dependsOn:
-  # - Linux_C_API_Packaging_CPU_x64
-  # - Linux_C_API_Packaging_CPU_aarch64
-  # - MacOS_C_API_Packaging_CPU_x64
-  # - Windows_Packaging_CPU_x86_${{ parameters.BuildVariant }}
+  - Linux_C_API_Packaging_CPU_x64
+  - Linux_C_API_Packaging_CPU_aarch64
+  - MacOS_C_API_Packaging_CPU_x64
+  - Windows_Packaging_CPU_x86_${{ parameters.BuildVariant }}
   - Windows_Packaging_CPU_x64_${{ parameters.BuildVariant }}
-  # - Windows_Packaging_CPU_arm_${{ parameters.BuildVariant }}
-  # - Windows_Packaging_CPU_arm64_${{ parameters.BuildVariant }}
-  # - Android_Java_API_AAR_Packaging_Full
-  # - iOS_Full_xcframework
+  - Windows_Packaging_CPU_arm_${{ parameters.BuildVariant }}
+  - Windows_Packaging_CPU_arm64_${{ parameters.BuildVariant }}
+  - Android_Java_API_AAR_Packaging_Full
+  - iOS_Full_xcframework
   condition: succeeded()
   steps:
   - checkout: self
@@ -349,54 +349,54 @@ jobs:
       artifactName: 'onnxruntime-win-x64'
       targetPath: '$(Build.BinariesDirectory)/nuget-artifact'
 
-  # - task: DownloadPipelineArtifact@0
-  #   displayName: 'Download win-x86 Pipeline Artifact'
-  #   inputs:
-  #     artifactName: 'onnxruntime-win-x86'
-  #     targetPath: '$(Build.BinariesDirectory)/nuget-artifact'
+  - task: DownloadPipelineArtifact@0
+    displayName: 'Download win-x86 Pipeline Artifact'
+    inputs:
+      artifactName: 'onnxruntime-win-x86'
+      targetPath: '$(Build.BinariesDirectory)/nuget-artifact'
 
-  # - task: DownloadPipelineArtifact@0
-  #   displayName: 'Download win-arm64 Pipeline Artifact'
-  #   inputs:
-  #     artifactName: 'onnxruntime-win-arm64'
-  #     targetPath: '$(Build.BinariesDirectory)/nuget-artifact'
+  - task: DownloadPipelineArtifact@0
+    displayName: 'Download win-arm64 Pipeline Artifact'
+    inputs:
+      artifactName: 'onnxruntime-win-arm64'
+      targetPath: '$(Build.BinariesDirectory)/nuget-artifact'
 
-  # - task: DownloadPipelineArtifact@0
-  #   displayName: 'Download win-arm Pipeline Artifact'
-  #   inputs:
-  #     artifactName: 'onnxruntime-win-arm'
-  #     targetPath: '$(Build.BinariesDirectory)/nuget-artifact'
+  - task: DownloadPipelineArtifact@0
+    displayName: 'Download win-arm Pipeline Artifact'
+    inputs:
+      artifactName: 'onnxruntime-win-arm'
+      targetPath: '$(Build.BinariesDirectory)/nuget-artifact'
 
-  # - task: DownloadPipelineArtifact@0
-  #   displayName: 'Download osx-x64 Pipeline Artifact'
-  #   inputs:
-  #     artifactName: 'onnxruntime-osx'
-  #     targetPath: '$(Build.BinariesDirectory)/nuget-artifact'
+  - task: DownloadPipelineArtifact@0
+    displayName: 'Download osx-x64 Pipeline Artifact'
+    inputs:
+      artifactName: 'onnxruntime-osx'
+      targetPath: '$(Build.BinariesDirectory)/nuget-artifact'
 
-  # - task: DownloadPipelineArtifact@0
-  #   displayName: 'Download linux-x64 Pipeline Artifact'
-  #   inputs:
-  #     artifactName: 'onnxruntime-linux-x64'
-  #     targetPath: '$(Build.BinariesDirectory)/nuget-artifact'
+  - task: DownloadPipelineArtifact@0
+    displayName: 'Download linux-x64 Pipeline Artifact'
+    inputs:
+      artifactName: 'onnxruntime-linux-x64'
+      targetPath: '$(Build.BinariesDirectory)/nuget-artifact'
 
-  # - task: DownloadPipelineArtifact@0
-  #   displayName: 'Download Pipeline Artifact - NuGet'
-  #   inputs:
-  #     artifactName: 'onnxruntime-linux-aarch64'
-  #     targetPath: '$(Build.BinariesDirectory)/nuget-artifact'
+  - task: DownloadPipelineArtifact@0
+    displayName: 'Download Pipeline Artifact - NuGet'
+    inputs:
+      artifactName: 'onnxruntime-linux-aarch64'
+      targetPath: '$(Build.BinariesDirectory)/nuget-artifact'
 
-  # - task: DownloadPipelineArtifact@2
-  #   displayName: 'Download iOS Pipeline Artifact'
-  #   inputs:
-  #     artifactName: 'onnxruntime-ios-full-xcframework'
-  #     targetPath: '$(Build.BinariesDirectory)/nuget-artifact'
+  - task: DownloadPipelineArtifact@2
+    displayName: 'Download iOS Pipeline Artifact'
+    inputs:
+      artifactName: 'onnxruntime-ios-full-xcframework'
+      targetPath: '$(Build.BinariesDirectory)/nuget-artifact'
 
-  # - task: DownloadPipelineArtifact@2
-  #   displayName: 'Download android-full-aar Pipeline Artifact'
-  #   inputs:
-  #     artifactName: 'onnxruntime-android-full-aar'
-  #     patterns: '**/*.aar'
-  #     targetPath: '$(Build.BinariesDirectory)/nuget-artifact'
+  - task: DownloadPipelineArtifact@2
+    displayName: 'Download android-full-aar Pipeline Artifact'
+    inputs:
+      artifactName: 'onnxruntime-android-full-aar'
+      patterns: '**/*.aar'
+      targetPath: '$(Build.BinariesDirectory)/nuget-artifact'
 
   - task: DownloadPipelineArtifact@0
     displayName: 'Download drop-extra Pipeline Artifact'
@@ -409,7 +409,7 @@ jobs:
     workingDirectory: '$(Build.BinariesDirectory)/nuget-artifact'
     displayName: 'List artifacts'
 
-  #Reconstruct the build dir
+  # Reconstruct the build dir
   - task: PowerShell@2
     displayName: 'Extract native libraries for addition to nuget native package'
     inputs:
