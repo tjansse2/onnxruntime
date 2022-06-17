@@ -423,14 +423,16 @@ jobs:
 - job: NuGet_Packaging_GPU
   workspace:
     clean: all
-  pool: 'Win-CPU-2021'
+  # we need to use the 2022 pool to create the nuget package with pre-net6+Xamarin and net6 targets
+  # as VS2019 has no support for net6 and we need to use msbuild (from the VS install) to do the packing
+  pool: 'Azure-Pipelines-EO-Windows2022-aiinfra'
   variables:
     breakCodesignValidationInjection: ${{ parameters.DoEsrp }}
   dependsOn:
   - Windows_Packaging_gpu
-  - Windows_Packaging_tensorrt
-  - Linux_C_API_Packaging_GPU_x64
-  - Linux_C_API_Packaging_GPU_TensorRT_x64
+  # - Windows_Packaging_tensorrt
+  # - Linux_C_API_Packaging_GPU_x64
+  # - Linux_C_API_Packaging_GPU_TensorRT_x64
   condition: succeeded()
   steps:
   - checkout: self
@@ -441,29 +443,29 @@ jobs:
       artifactName: 'onnxruntime-win-x64-cuda'
       targetPath: '$(Build.BinariesDirectory)/nuget-artifact'
 
-  - task: DownloadPipelineArtifact@2
-    displayName: 'Download Pipeline Artifact - NuGet'
-    inputs:
-      artifactName: 'onnxruntime-win-x64-tensorrt'
-      targetPath: '$(Build.BinariesDirectory)/nuget-artifact'
+  # - task: DownloadPipelineArtifact@2
+  #   displayName: 'Download Pipeline Artifact - NuGet'
+  #   inputs:
+  #     artifactName: 'onnxruntime-win-x64-tensorrt'
+  #     targetPath: '$(Build.BinariesDirectory)/nuget-artifact'
 
-  - task: DownloadPipelineArtifact@2
-    displayName: 'Download Pipeline Artifact - NuGet'
-    inputs:
-      artifactName: 'onnxruntime-linux-x64-cuda'
-      targetPath: '$(Build.BinariesDirectory)/nuget-artifact'
+  # - task: DownloadPipelineArtifact@2
+  #   displayName: 'Download Pipeline Artifact - NuGet'
+  #   inputs:
+  #     artifactName: 'onnxruntime-linux-x64-cuda'
+  #     targetPath: '$(Build.BinariesDirectory)/nuget-artifact'
 
-  - task: DownloadPipelineArtifact@2
-    displayName: 'Download Pipeline Artifact - NuGet'
-    inputs:
-      artifactName: 'onnxruntime-linux-x64-tensorrt'
-      targetPath: '$(Build.BinariesDirectory)/nuget-artifact'
+  # - task: DownloadPipelineArtifact@2
+  #   displayName: 'Download Pipeline Artifact - NuGet'
+  #   inputs:
+  #     artifactName: 'onnxruntime-linux-x64-tensorrt'
+  #     targetPath: '$(Build.BinariesDirectory)/nuget-artifact'
 
-  - task: DownloadPipelineArtifact@2
-    displayName: 'Download Pipeline Artifact - NuGet'
-    inputs:
-      artifactName: 'drop-extra'
-      targetPath: '$(Build.BinariesDirectory)/extra-artifact'
+  # - task: DownloadPipelineArtifact@2
+  #   displayName: 'Download Pipeline Artifact - NuGet'
+  #   inputs:
+  #     artifactName: 'drop-extra'
+  #     targetPath: '$(Build.BinariesDirectory)/extra-artifact'
 
   #Reconstruct the build dir
   - task: PowerShell@2
@@ -487,22 +489,38 @@ jobs:
     inputs:
       versionSpec: 5.7.0
 
-  - task: MSBuild@1
-    displayName: 'Restore NuGet Packages'
+  - task: PowerShell@2
+    displayName: Install .NET 6 workloads
     inputs:
-      solution: '$(Build.SourcesDirectory)\csharp\OnnxRuntime.CSharp.sln'
-      platform: 'Any CPU'
-      configuration: RelWithDebInfo
-      msbuildArguments: '-t:restore -p:OrtPackageId="Microsoft.ML.OnnxRuntime.Gpu"'
+      targetType: 'inline'
+      script: |
+        dotnet workload install android ios maccatalyst macos
+      workingDirectory: '$(Build.SourcesDirectory)\csharp'
+    
+  - task: PowerShell@2
+    displayName: Build .NET 6 targets using dotnet
+    inputs:
+      targetType: 'inline'
+      script: |
+        dotnet build .\src\Microsoft.ML.OnnxRuntime\Microsoft.ML.OnnxRuntime.csproj -p:SelectedTargets=Net6 -p:Configuration=RelWithDebInfo -p:Platform="Any CPU" -p:OnnxRuntimeBuildDirectory="$(Build.BinariesDirectory)" -p:OrtPackageId="Microsoft.ML.OnnxRuntime.Gpu" -p:IsReleaseBuild=${{ parameters.IsReleaseBuild }}
       workingDirectory: '$(Build.SourcesDirectory)\csharp'
 
   - task: MSBuild@1
-    displayName: 'Build C#'
+    displayName: 'Restore NuGet Packages and create project.assets.json for pre-.net6 targets'
+    inputs:
+      solution: '$(Build.SourcesDirectory)\csharp\OnnxRuntime.CSharp.sln'
+      platform: 'Any CPU'
+      configuration: RelWithDebInfo
+      msbuildArguments: '-t:restore -p:SelectedTargets=PreNet6 -p:OrtPackageId="Microsoft.ML.OnnxRuntime.Gpu"'
+      workingDirectory: '$(Build.SourcesDirectory)\csharp'
+
+  - task: MSBuild@1
+    displayName: 'Build C# for pre-.net6 targets'
     inputs:
       solution: '$(Build.SourcesDirectory)\csharp\OnnxRuntime.CSharp.sln'
       configuration: RelWithDebInfo
       platform: 'Any CPU'
-      msbuildArguments: '-p:OnnxRuntimeBuildDirectory="$(Build.BinariesDirectory)" -p:OrtPackageId="Microsoft.ML.OnnxRuntime.Gpu" -p:IsReleaseBuild=${{ parameters.IsReleaseBuild }}'
+      msbuildArguments: '-p:SelectedTargets=PreNet6 -p:OnnxRuntimeBuildDirectory="$(Build.BinariesDirectory)" -p:OrtPackageId="Microsoft.ML.OnnxRuntime.Gpu" -p:IsReleaseBuild=${{ parameters.IsReleaseBuild }}'
       workingDirectory: '$(Build.SourcesDirectory)\csharp'
 
   - template: templates/win-esrp-dll.yml
@@ -510,6 +528,15 @@ jobs:
       FolderPath: '$(Build.SourcesDirectory)\csharp\src\Microsoft.ML.OnnxRuntime\bin\RelWithDebInfo'
       DisplayName: 'ESRP - Sign C# dlls'
       DoEsrp: ${{ parameters.DoEsrp }}
+
+  - task: MSBuild@1
+    displayName: Update projects.assets.json will combined list of all target frameworks
+    inputs:
+      solution: '$(Build.SourcesDirectory)\csharp\src\Microsoft.ML.OnnxRuntime\Microsoft.ML.OnnxRuntime.csproj'
+      platform: 'Any CPU'
+      configuration: RelWithDebInfo
+      msbuildArguments: '-t:restore -p:SelectedTargets=All -p:OrtPackageId=Microsoft.ML.OnnxRuntime.Gpu'
+      workingDirectory: '$(Build.SourcesDirectory)\csharp'
 
   - task: MSBuild@1
     displayName: 'Build Nuget Packages'
