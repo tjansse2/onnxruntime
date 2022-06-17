@@ -332,11 +332,11 @@ jobs:
     OrtPackageId: ${{ parameters.OrtNugetPackageId }}
     breakCodesignValidationInjection: ${{ parameters.DoEsrp }}
   dependsOn:
-  # - Linux_C_API_Packaging_CPU_x64
+  - Linux_C_API_Packaging_CPU_x64
   # - Linux_C_API_Packaging_CPU_aarch64
   # - MacOS_C_API_Packaging_CPU_x64
   # - Windows_Packaging_CPU_x86_${{ parameters.BuildVariant }}
-  - Windows_Packaging_CPU_x64_${{ parameters.BuildVariant }}
+  # - Windows_Packaging_CPU_x64_${{ parameters.BuildVariant }}
   # - Windows_Packaging_CPU_arm_${{ parameters.BuildVariant }}
   # - Windows_Packaging_CPU_arm64_${{ parameters.BuildVariant }}
   # - Android_Java_API_AAR_Packaging_Full
@@ -345,11 +345,11 @@ jobs:
   steps:
   - checkout: self
     submodules: true
-  - task: DownloadPipelineArtifact@0
-    displayName: 'Download win-x64 Pipeline Artifact'
-    inputs:
-      artifactName: 'onnxruntime-win-x64'
-      targetPath: '$(Build.BinariesDirectory)/nuget-artifact'
+  # - task: DownloadPipelineArtifact@0
+  #   displayName: 'Download win-x64 Pipeline Artifact'
+  #   inputs:
+  #     artifactName: 'onnxruntime-win-x64'
+  #     targetPath: '$(Build.BinariesDirectory)/nuget-artifact'
 
   # - task: DownloadPipelineArtifact@0
   #   displayName: 'Download win-x86 Pipeline Artifact'
@@ -375,11 +375,11 @@ jobs:
   #     artifactName: 'onnxruntime-osx'
   #     targetPath: '$(Build.BinariesDirectory)/nuget-artifact'
 
-  # - task: DownloadPipelineArtifact@0
-  #   displayName: 'Download linux-x64 Pipeline Artifact'
-  #   inputs:
-  #     artifactName: 'onnxruntime-linux-x64'
-  #     targetPath: '$(Build.BinariesDirectory)/nuget-artifact'
+  - task: DownloadPipelineArtifact@0
+    displayName: 'Download linux-x64 Pipeline Artifact'
+    inputs:
+      artifactName: 'onnxruntime-linux-x64'
+      targetPath: '$(Build.BinariesDirectory)/nuget-artifact'
 
   # - task: DownloadPipelineArtifact@0
   #   displayName: 'Download Pipeline Artifact - NuGet'
@@ -400,11 +400,11 @@ jobs:
   #     patterns: '**/*.aar'
   #     targetPath: '$(Build.BinariesDirectory)/nuget-artifact'
 
-  # - task: DownloadPipelineArtifact@0
-  #   displayName: 'Download drop-extra Pipeline Artifact'
-  #   inputs:
-  #     artifactName: 'drop-extra'
-  #     targetPath: '$(Build.BinariesDirectory)/extra-artifact'
+  - task: DownloadPipelineArtifact@0
+    displayName: 'Download drop-extra Pipeline Artifact'
+    inputs:
+      artifactName: 'drop-extra'
+      targetPath: '$(Build.BinariesDirectory)/extra-artifact'
 
   - script: |
      dir
