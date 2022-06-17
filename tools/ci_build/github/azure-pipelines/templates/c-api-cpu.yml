@@ -398,11 +398,11 @@ jobs:
   #     patterns: '**/*.aar'
   #     targetPath: '$(Build.BinariesDirectory)/nuget-artifact'
 
-  # - task: DownloadPipelineArtifact@0
-  #   displayName: 'Download drop-extra Pipeline Artifact'
-  #   inputs:
-  #     artifactName: 'drop-extra'
-  #     targetPath: '$(Build.BinariesDirectory)/extra-artifact'
+  - task: DownloadPipelineArtifact@0
+    displayName: 'Download drop-extra Pipeline Artifact'
+    inputs:
+      artifactName: 'drop-extra'
+      targetPath: '$(Build.BinariesDirectory)/extra-artifact'
 
   - script: |
      dir
