@@ -435,7 +435,7 @@ jobs:
         dotnet workload install android ios maccatalyst macos
       workingDirectory: '$(Build.SourcesDirectory)\csharp'
     
-  - task: PowerShell@2
+  - task: PowerShell@2  # 
     displayName: PowerShell Build .NET 6 targets using dotnet
     inputs:
       targetType: 'inline'
@@ -464,7 +464,7 @@ jobs:
       # 'Any CPU' is the default (first 'mixed' platform specified in the csproj), and if we don't specify an override
       # the build output path does not include the platform in it.
       arguments: '-p:SelectedTargets=Net6  -p:Configuration=RelWithDebInfo -p:OnnxRuntimeBuildDirectory="$(Build.BinariesDirectory)" -p:OrtPackageId=$(OrtPackageId) -p:IsReleaseBuild=${{ parameters.IsReleaseBuild }}'
-      workingDirectory: '$(Build.SourcesDirectory)\csharp'
+      workingDirectory: '$(Build.SourcesDirectory)/csharp'
 
   - task: MSBuild@1
     displayName: 'Restore NuGet Packages and create project.assets.json for pre-.net6 targets'
