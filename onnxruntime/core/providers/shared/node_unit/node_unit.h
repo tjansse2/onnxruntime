@@ -65,9 +65,11 @@ class NodeUnit {
 
   const Node& GetNode() const noexcept { return target_node_; }
   const std::vector<const Node*>& GetOutputNodes() const noexcept { return output_nodes_; }
+  const std::vector<const Node*>& GetInputNodes() const noexcept { return input_nodes_; }
 
  private:
   const std::vector<const Node*> output_nodes_;  // all the nodes producing outputs for this NodeUnit
+  const std::vector<const Node*> input_nodes_;   // all the nodes consuming sources for this NodeUnit
   const Node& target_node_;
   const Type type_;
 

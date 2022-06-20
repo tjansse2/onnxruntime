@@ -2,7 +2,8 @@
 // Licensed under the MIT License.
 
 #include "node_support_checker.h"
-
+#include "op_checker_impl.h"
+#include "core/providers/shared/node_unit/node_unit.h"
 #include <unordered_map>
 
 #include "core/common/common.h"
@@ -22,7 +23,7 @@ namespace xnnpack {
 
 namespace {
 // function to check if a node is supported. kernel must have been matched previously to check type constraints.
-using CheckerFn = std::function<bool(const Node& node,
+using CheckerFn = std::function<bool(const onnxruntime::NodeUnit& node,
                                      const GraphViewer& graph)>;
 
 // function to check if we can fuse a node with a previously selected one.
@@ -79,10 +80,11 @@ const Node* ClipReluChecker(const Node& node,
 
 }  // namespace
 
-bool NodeSupportChecker::IsNodeSupported(const Node& node) {
+bool NodeSupportChecker::IsNodeSupported(const NodeUnit& nodeunit) {
+  auto& node = nodeunit.GetNode();
   static std::unordered_map<std::string, CheckerFn> checkers{
-      {"Conv", Conv::IsOnnxNodeSupported},
-      {"MaxPool", MaxPool::IsOnnxNodeSupported},
+      {"Conv", IsConvOnnxNodeSupported},
+      {"MaxPool", IsMaxPoolOnnxNodeSupported},
   };
 
   bool supported = false;
@@ -90,7 +92,7 @@ bool NodeSupportChecker::IsNodeSupported(const Node& node) {
   if (node.Domain() == onnxruntime::kOnnxDomain) {
     const auto entry = checkers.find(node.OpType());
     if (entry != checkers.cend()) {
-      supported = entry->second(node, graph_);
+      supported = entry->second(nodeunit, graph_);
     }
   }
 
@@ -104,7 +106,7 @@ const Node* NodeSupportChecker::IsNodeSupportedWithFusion(const Node& node) {
   };
 
   const Node* fuse_with{nullptr};
-
+  //it should be fine to check only the target node.
   if (node.Domain() == onnxruntime::kOnnxDomain) {
     const auto entry = checkers.find(node.OpType());
     if (entry != checkers.cend()) {

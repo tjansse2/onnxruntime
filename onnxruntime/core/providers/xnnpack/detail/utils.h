@@ -13,8 +13,20 @@
 
 namespace onnxruntime {
 class GraphViewer;
-
+class NodeUnit;
 namespace xnnpack {
+
+using Shape = std::vector<uint32_t>;
+enum class QuantizedOpType : uint8_t {
+  QLinearConv,
+  QLinearMaxPool,
+  // QDQ operator
+  QDQConv,
+  QDQMaxPool,
+  Unknown,
+};
+
+QuantizedOpType GetQuantizedOpType(const NodeUnit& node_unit);
 
 // forward declaration for this EP's namespace.
 template <typename T>
@@ -35,5 +47,6 @@ using XnnpackOperator = std::unique_ptr<struct xnn_operator, XnnpackOperatorDele
 
 std::unique_ptr<IndexedSubGraph::MetaDef> FuseActivation(const Node& conv, const Node& activation,
                                                          const GraphViewer& graph);
+std::unique_ptr<IndexedSubGraph::MetaDef> FuseQDQGroup(const NodeUnit& unit_node);
 }  // namespace xnnpack
 }  // namespace onnxruntime

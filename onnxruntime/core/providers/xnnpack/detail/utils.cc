@@ -7,13 +7,76 @@
 #include "core/graph/indexed_sub_graph.h"
 #include "core/graph/node_attr_utils.h"
 
+#include "core/providers/shared/node_unit/node_unit.h"
 namespace onnxruntime {
 namespace xnnpack {
+
+QuantizedOpType GetQuantizedOpType(const NodeUnit& node_unit) {
+  const auto& op_type = node_unit.OpType();
+  if (node_unit.UnitType() == NodeUnit::Type::QDQGroup) {
+    if (op_type == "Conv")
+      return QuantizedOpType::QDQConv;
+    else if (op_type == "MaxPool")
+      return QuantizedOpType::QDQMaxPool;
+  }
+  return QuantizedOpType::Unknown;
+}
 
 bool IsPaddingTypeSupported(AutoPadType auto_pad) {
   return auto_pad == AutoPadType::NOTSET ||
          auto_pad == AutoPadType::VALID ||
          auto_pad == AutoPadType::SAME_UPPER;
+}
+
+std::unique_ptr<IndexedSubGraph::MetaDef> FuseQDQGroup(const NodeUnit& unit_node) {
+  QuantizedOpType qtype = GetQuantizedOpType(unit_node);
+  // create a ComputeCapability for QDQ node.
+  std::unique_ptr<IndexedSubGraph::MetaDef> metadef = std::make_unique<IndexedSubGraph::MetaDef>();
+  IndexedSubGraph::MetaDef& def = *metadef;
+
+  // inputs
+  const auto& inputs = unit_node.Inputs();
+
+  if (qtype == QuantizedOpType::QDQConv) {
+    // registration
+    def.name = "QLinearConv";
+    def.domain = kMSInternalNHWCDomain;  // node.Domain();  // should always be kMSInternalNHWCDomain
+    def.since_version = 10;              // onnx schema version
+    if (inputs.size() > 2) {             // with bias
+      def.inputs.reserve(9);
+    } else {
+      def.inputs.reserve(8);
+    }
+    // x x-scale x-zp w w-scale w-zp
+    std::for_each(inputs.cbegin(), inputs.cbegin() + 2,
+                  [&def](const NodeUnitIODef& arg) {
+                    // keep the number of inputs the same by inserting an empty string for a missing optional input
+                    def.inputs.push_back(arg.node_arg.Name());
+                    const auto& quant_param = arg.quant_param.value();
+                    def.inputs.push_back(quant_param.scale.Name());
+                    def.inputs.push_back(quant_param.zero_point ? quant_param.zero_point->Name() : "");
+                  });
+    // y-scale y-zeropoint
+    const auto& y_quant_param = unit_node.Outputs()[0].quant_param.value();
+    def.inputs.push_back(y_quant_param.scale.Name());
+    def.inputs.push_back(y_quant_param.zero_point ? y_quant_param.zero_point->Name() : "");
+    // bias
+    if (inputs.size() > 2) {
+      def.inputs.push_back(inputs[2].node_arg.Name());
+    }
+  } else {
+    //QDQMaxPool?
+  }
+  // outputs
+  for (const auto& out : unit_node.Outputs()) {
+    def.outputs.push_back(out.node_arg.Name());
+  }
+
+  // attributes
+  // copy existing and add the activation info
+  def.attributes = unit_node.GetNode().GetAttributes();
+  
+  return metadef;
 }
 
 // Fuse activation with node. Currently Conv and MaxPool are supported.

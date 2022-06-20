@@ -8,6 +8,7 @@
 namespace onnxruntime {
 class GraphViewer;
 class Node;
+class NodeUnit;
 
 namespace xnnpack {
 class NodeSupportChecker {
@@ -18,7 +19,7 @@ class NodeSupportChecker {
         supported_nodes_{supported_nodes} {
   }
 
-  bool IsNodeSupported(const Node& node);
+  bool IsNodeSupported(const NodeUnit& node);
   const Node* IsNodeSupportedWithFusion(const Node& node);
 
  private:

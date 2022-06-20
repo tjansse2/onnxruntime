@@ -29,6 +29,8 @@ KernelCreateInfo BuildKernelCreateInfo<void>() {
       ONNX_OPERATOR_KERNEL_CLASS_NAME(kXnnpackExecutionProvider, kMSInternalNHWCDomain, Start, Op)>
 
 class ONNX_OPERATOR_KERNEL_CLASS_NAME(kXnnpackExecutionProvider, kMSInternalNHWCDomain, 11, Conv);
+// class ONNX_OPERATOR_KERNEL_CLASS_NAME(kXnnpackExecutionProvider, kMSInternalNHWCDomain, 10, QLinearConv);
+class ONNX_OPERATOR_TYPED_KERNEL_CLASS_NAME(kXnnpackExecutionProvider, kMSInternalNHWCDomain, 10, uint8_t, QLinearConv);
 
 class ONNX_OPERATOR_VERSIONED_KERNEL_CLASS_NAME(kXnnpackExecutionProvider, kMSInternalNHWCDomain, 11, 11, MaxPool);
 class ONNX_OPERATOR_KERNEL_CLASS_NAME(kXnnpackExecutionProvider, kMSInternalNHWCDomain, 12, MaxPool);
@@ -39,6 +41,8 @@ std::unique_ptr<KernelRegistry> RegisterKernels() {
   static const BuildKernelCreateInfoFn function_table[] = {
       BuildKernelCreateInfo<void>,  // default entry to avoid the list becoming empty after ops-reducing
       KERNEL_CREATE_INFO(11, Conv),
+      // KERNEL_CREATE_INFO(10, QLinearConv),
+      BuildKernelCreateInfo<ONNX_OPERATOR_TYPED_KERNEL_CLASS_NAME(kXnnpackExecutionProvider, kMSInternalNHWCDomain, 10, uint8_t, QLinearConv)>,
 
       KERNEL_CREATE_INFO_VERSIONED(11, 11, MaxPool),
       KERNEL_CREATE_INFO(12, MaxPool),
@@ -112,29 +116,28 @@ std::vector<std::unique_ptr<ComputeCapability>> XnnpackExecutionProvider::GetCap
   std::unordered_map<const Node*, const NodeUnit*> node_unit_map;
   std::tie(node_unit_holder, node_unit_map) = GetAllNodeUnits(graph);
 
+  // This holds the result of whether a NodeUnit is supported or not,
+  // to prevent nodes in a NodeUnit to be checked for multiple times
+  std::unordered_map<const NodeUnit*, bool> node_unit_supported_result;
+  node_unit_supported_result.reserve(node_unit_holder.size());
+
   for (NodeIndex idx : graph.GetNodesInTopologicalOrder()) {
     const Node* n = graph.GetNode(idx);
     if (n == nullptr) {
       continue;
     }
-
-    // node is part of a QDQ group. when we implement support for quantized ops we could potentially handle the
-    // QDQ group. until then we have to leave it as-is otherwise we'll make performance worse.
-    // e.g. If we took the MaxPool from DQ -> MaxPool -> Q we are forcing it to run in fp32 instead of allowing a QDQ
-    // aware EP to convert the group into a single quantized MaxPool node.
-    if (node_unit_map[n]->UnitType() == NodeUnit::Type::QDQGroup) {
-      continue;
-    }
+    const NodeUnit& unit_node = *node_unit_map[n];
+    // if node is part of a QDQ group. we will mark it compatiable in the first call as long as we support the target node.
 
     const Node& node = *n;
     bool request_node = false;
-
     if (node.GetExecutionProviderType() == "") {
       // unassigned node.
       // check if this is an ONNX operator that we have an NHWC xnnpack kernel for.
-      if (checker.IsNodeSupported(node)) {
+      if (checker.IsNodeSupported(unit_node)) {
         request_node = true;
-      } else {
+        //we need to support quantizedOp fusion
+      } else if (unit_node.UnitType() != NodeUnit::Type::QDQGroup) {
         // see if it's an activation we can fuse with a node we support. note that we can only do this after
         // the layout transform as we need to fuse with the NWHC op that we have the real kernel for.
         const Node* fuse_with = checker.IsNodeSupportedWithFusion(node);
@@ -161,19 +164,49 @@ std::vector<std::unique_ptr<ComputeCapability>> XnnpackExecutionProvider::GetCap
       // second call to GetCapability after layout changes.
       // as we requested the node in the first call, it should be supported in the second call.
       request_node = true;
+      // we will create a quantized Op to replace QDQGroup in the second call, then we can fuse it with activation after
+      if (unit_node.UnitType() == NodeUnit::Type::QDQGroup) {
+        // any node in nodeunit will trigger IsNodeSupported, so we just check once.
+        if (node_unit_supported_result.count(&unit_node)) {
+          continue;
+        }
+        // create a ComputeCapability for the QDQGroup node.
+        std::unique_ptr<IndexedSubGraph> sub_graph = std::make_unique<IndexedSubGraph>();
+        for (const auto& node_i : unit_node.GetInputNodes()) {
+          sub_graph->nodes.push_back(node_i->Index());
+        }
+        sub_graph->nodes.push_back(unit_node.Index());
+        for (const auto& node_o : unit_node.GetOutputNodes()) {
+          sub_graph->nodes.push_back(node_o->Index());
+        }
+        sub_graph->SetMetaDef(std::move(FuseQDQGroup(unit_node)));
+        sub_graph->use_existing_schema = true;
+        capabilities.push_back(std::make_unique<ComputeCapability>(std::move(sub_graph)));
+        node_to_compute_capability.insert({&unit_node.GetNode(), capabilities.back().get()});
+        /*
+        for (const auto& node_i : unit_node.GetInputNodes()) {
+          node_to_compute_capability.insert({node_i, capabilities.back().get()});
+        }
+        for (const auto& node_o : unit_node.GetOutputNodes()) {
+          node_to_compute_capability.insert({node_o, capabilities.back().get()});
+        }*/
+        supported_nodes.insert(&unit_node.GetNode());
+        node_unit_supported_result[&unit_node] = request_node;
+        continue;
+      }
     } else {
       // node belongs to another EP
       continue;
     }
 
     if (request_node) {
-      // create a ComputeCapability for the individual node.
-      std::unique_ptr<IndexedSubGraph> sub_graph = std::make_unique<IndexedSubGraph>();
-      sub_graph->nodes.push_back(node.Index());
-      capabilities.push_back(std::make_unique<ComputeCapability>(std::move(sub_graph)));
+        // create a ComputeCapability for the individual node.
+        std::unique_ptr<IndexedSubGraph> sub_graph = std::make_unique<IndexedSubGraph>();
+        sub_graph->nodes.push_back(node.Index());
+        capabilities.push_back(std::make_unique<ComputeCapability>(std::move(sub_graph)));
 
-      node_to_compute_capability.insert({&node, capabilities.back().get()});
-      supported_nodes.insert(&node);
+        node_to_compute_capability.insert({&node, capabilities.back().get()});
+        supported_nodes.insert(&node);
     }
   }
 

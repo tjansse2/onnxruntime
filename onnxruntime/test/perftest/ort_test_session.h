@@ -26,6 +26,8 @@ class OnnxRuntimeTestSession : public TestSession {
   }
 
   bool PopulateGeneratedInputTestData();
+  void initilize_tensor_with_seed(int32_t seed, ONNXTensorElementDataType type, 
+      void* data_ptr, const std::vector<int64_t>& input_node_dim);
 
   ~OnnxRuntimeTestSession() = default;
 

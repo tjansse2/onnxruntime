@@ -20,10 +20,6 @@ class MaxPool : public OpKernel {
 
   Status Compute(OpKernelContext* context) const override;
 
-  // check to see if an ONNX NCHW Conv node is supported by this implementation. the first input and output will be
-  // converted to NHWC by ORT.
-  static bool IsOnnxNodeSupported(const onnxruntime::Node& nchw_node, const GraphViewer& graph);
-
  private:
   const PoolAttributes pool_attrs_;
   TensorShapeVector output_dims_;

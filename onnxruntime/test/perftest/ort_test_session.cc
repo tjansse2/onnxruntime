@@ -368,7 +368,7 @@ OnnxRuntimeTestSession::OnnxRuntimeTestSession(Ort::Env& env, std::random_device
       if (key == "runtime") {
         std::set<std::string> supported_runtime = {"CPU", "GPU_FP32", "GPU", "GPU_FLOAT16", "DSP", "AIP_FIXED_TF"};
         if (supported_runtime.find(value) == supported_runtime.end()) {
-          ORT_THROW(R"(Wrong configuration value for the key 'runtime'. 
+          ORT_THROW(R"(Wrong configuration value for the key 'runtime'.
 select from 'CPU', 'GPU_FP32', 'GPU', 'GPU_FLOAT16', 'DSP', 'AIP_FIXED_TF'. \n)");
         }
       } else if (key == "priority") {
@@ -376,7 +376,7 @@ select from 'CPU', 'GPU_FP32', 'GPU', 'GPU_FLOAT16', 'DSP', 'AIP_FIXED_TF'. \n)"
       } else if (key == "buffer_type") {
         std::set<std::string> supported_buffer_type = {"TF8", "TF16", "UINT8", "FLOAT", "ITENSOR"};
         if (supported_buffer_type.find(value) == supported_buffer_type.end()) {
-          ORT_THROW(R"(Wrong configuration value for the key 'buffer_type'. 
+          ORT_THROW(R"(Wrong configuration value for the key 'buffer_type'.
 select from 'TF8', 'TF16', 'UINT8', 'FLOAT', 'ITENSOR'. \n)");
         }
       } else {
@@ -546,6 +546,50 @@ select from 'TF8', 'TF16', 'UINT8', 'FLOAT', 'ITENSOR'. \n)");
   }
 }
 
+// seed=-1 means no initilize
+void OnnxRuntimeTestSession::initilize_tensor_with_seed(int32_t seed, ONNXTensorElementDataType type,
+                                                        void* data_ptr, const std::vector<int64_t>& input_node_dim) {
+  if (seed < 0) return;
+  std::default_random_engine engin;
+  engin.seed(seed);
+  int64_t total_elem = 1;
+  for (auto e : input_node_dim) {
+    total_elem *= e;
+  }
+  switch (type) {
+    case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT: {
+      const std::uniform_real_distribution<float>::param_type p(0, static_cast<float>(5));
+      std::uniform_real_distribution<float> dist;
+      auto* ptr = reinterpret_cast<float*>(data_ptr);
+      for (int i = 0; i < total_elem; ++i) {
+        ptr[i] = dist(engin, p);
+      }
+      break;
+    }
+    case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8: {
+      const std::uniform_int_distribution<int>::param_type p(0, static_cast<int>(255));
+      std::uniform_int_distribution<int> dist;
+      auto* ptr = reinterpret_cast<uint8_t*>(data_ptr);
+      for (int i = 0; i < total_elem; ++i) {
+        ptr[i] = static_cast<uint8_t>(dist(engin, p));
+      }
+      break;
+    }
+    case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8: {
+      const std::uniform_int_distribution<int>::param_type p(-128, static_cast<int>(128));
+      std::uniform_int_distribution<int> dist;
+      auto* ptr = reinterpret_cast<int8_t*>(data_ptr);
+      for (int i = 0; i < total_elem; ++i) {
+        ptr[i] = static_cast<int8_t>(dist(engin, p));
+      }
+      break;
+    }
+    default:
+      "not implemented yet, we won't initialize it";
+      break;
+  }
+}
+
 bool OnnxRuntimeTestSession::PopulateGeneratedInputTestData() {
   // iterate over all input nodes
   for (size_t i = 0; i < static_cast<size_t>(input_length_); i++) {
@@ -565,6 +609,7 @@ bool OnnxRuntimeTestSession::PopulateGeneratedInputTestData() {
       auto allocator = static_cast<OrtAllocator*>(Ort::AllocatorWithDefaultOptions());
       Ort::Value input_tensor = Ort::Value::CreateTensor(allocator, (const int64_t*)input_node_dim.data(),
                                                          input_node_dim.size(), tensor_info.GetElementType());
+      initilize_tensor_with_seed(0, tensor_info.GetElementType(), input_tensor.GetTensorMutableData<uint8_t>(), input_node_dim);
       PreLoadTestData(0, i, std::move(input_tensor));
     }
   }
