@@ -197,6 +197,8 @@ enum MlasUArch {
 #define MLAS_SGEMM_PACKED_STRIDEK                   256
 #define MLAS_DGEMM_STRIDEN                          64
 #define MLAS_DGEMM_STRIDEK                          128
+#define MLAS_DGEMM_PACKED_STRIDEN                   128
+#define MLAS_DGEMM_PACKED_STRIDEK                   256
 
 //
 // Define the alignment for segmenting a GEMM operation across multiple

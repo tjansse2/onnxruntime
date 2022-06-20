@@ -726,6 +726,141 @@ Return Value:
 }
 
 void
+MlasDgemmPackedOperation(
+    CBLAS_TRANSPOSE TransA,
+    size_t M,
+    size_t RangeStartN,
+    size_t RangeCountN,
+    size_t K,
+    double alpha,
+    const double* A,
+    size_t lda,
+    const void* PackedB,
+    size_t AlignedN,
+    double beta,
+    double* C,
+    size_t ldc
+    )
+/*++
+
+Routine Description:
+
+    This routine implements the double precision matrix/matrix multiply
+    operation (DGEMM).
+
+Arguments:
+
+    TransA - Supplies the transpose operation for matrix A.
+
+    M - Supplies the number of rows of matrix A and matrix C.
+
+    RangeStartN - Supplies the starting column from packed matrix B.
+
+    RangeCountN - Supplies the number of columns of matrix B and matrix C.
+
+    K - Supplies the number of columns of matrix A and the number of rows of
+        matrix B.
+
+    alpha - Supplies the scalar alpha multiplier (see DGEMM definition).
+
+    A - Supplies the address of matrix A.
+
+    lda - Supplies the first dimension of matrix A.
+
+    PackedB - Supplies the address of packed matrix B.
+
+    AlignedN - Supplies the total number of aligned columns for packed matrix B.
+
+    ldb - Supplies the first dimension of matrix B.
+
+    beta - Supplies the scalar beta multiplier (see DGEMM definition).
+
+    C - Supplies the address of matrix C.
+
+    ldc - Supplies the first dimension of matrix C.
+
+Return Value:
+
+    None.
+
+--*/
+{
+    double PanelA[MLAS_DGEMM_TRANSA_ROWS * MLAS_DGEMM_PACKED_STRIDEK];
+
+    //
+    // Step through each slice of matrix B along the N dimension.
+    //
+
+    size_t CountN;
+
+    for (size_t n = 0; n < RangeCountN; n += CountN) {
+
+        const size_t SliceStartN = RangeStartN + n;
+
+        CountN = std::min(RangeCountN - n, size_t(MLAS_DGEMM_PACKED_STRIDEN));
+
+        //
+        // Multiply the output matrix by beta as needed.
+        //
+
+        if (beta != 0.0f && beta != 1.0f) {
+            MlasDgemmMultiplyBeta(C + n, M, CountN, ldc, beta);
+        }
+
+        //
+        // Step through each slice of matrix B along the K dimension.
+        //
+
+        size_t CountK;
+        bool ZeroMode = (beta == 0.0f);
+
+        for (size_t k = 0; k < K; k += CountK) {
+
+            CountK = std::min(K - k, size_t(MLAS_DGEMM_PACKED_STRIDEK));
+
+            //
+            // Step through each slice of matrix A along the M dimension.
+            //
+
+            const double* pb = (const double*)PackedB + AlignedN * k + CountK * SliceStartN;
+            double* c = C + n;
+
+            if (TransA == CblasNoTrans) {
+
+                MlasDgemmKernelLoop(A + k, pb, c, CountK, M, CountN, lda, ldc, alpha, ZeroMode);
+
+            } else {
+
+                const double* a = A + k * lda;
+                size_t RowsRemaining = M;
+
+                while (RowsRemaining > 0) {
+
+                    //
+                    // Transpose elements from matrix A into a local buffer.
+                    //
+
+                    size_t RowsTransposed = std::min(RowsRemaining, size_t(MLAS_DGEMM_TRANSA_ROWS));
+
+                    MlasDgemmTransposeA(PanelA, a, lda, RowsTransposed, CountK);
+
+                    RowsRemaining -= RowsTransposed;
+                    a += RowsTransposed;
+
+                    //
+                    // Step through the rows of the local buffer.
+                    //
+
+                    c = MlasDgemmKernelLoop(PanelA, pb, c, CountK, RowsTransposed, CountN, CountK, ldc, alpha, ZeroMode);
+                }
+            }
+
+            ZeroMode = false;
+        }
+    }
+}
+
+void
 MlasDgemmThreaded(
     const ptrdiff_t ThreadCountM,
     const ptrdiff_t ThreadCountN,
@@ -792,15 +927,26 @@ Return Value:
     //
 
     const size_t lda = Data->lda;
-    const size_t ldb = Data->ldb;
     const size_t ldc = Data->ldc;
 
     const double* A = Data->A + RangeStartM * ((TransA == CblasNoTrans) ? lda : 1);
-    const double* B = Data->B + RangeStartN * ((TransB == CblasNoTrans) ? 1 : ldb);
     double* C = Data->C + RangeStartM * ldc + RangeStartN;
 
-    MlasDgemmOperation(TransA, TransB, RangeCountM, RangeCountN, K,
-        Data->alpha, A, lda, B, ldb, Data->beta, C, ldc);
+    if (Data->BIsPacked) {
+
+        MlasDgemmPackedOperation(TransA, RangeCountM, RangeStartN, RangeCountN,
+            K, Data->alpha, A, lda, Data->B,
+            BlockedN * MLAS_DGEMM_STRIDEN_THREAD_ALIGN, Data->beta, C, ldc);
+
+    } else {
+
+        const size_t ldb = Data->ldb;
+
+        const double* B = Data->B + RangeStartN * ((TransB == CblasNoTrans) ? 1 : ldb);
+
+        MlasDgemmOperation(TransA, TransB, RangeCountM, RangeCountN, K,
+            Data->alpha, A, lda, B, ldb, Data->beta, C, ldc);
+    }
 }
 
 #if defined(_MSC_VER) && !defined(__clang__)
@@ -888,3 +1034,104 @@ MlasGemmBatch(
 #pragma warning(pop)
 #endif
 #endif
+
+size_t
+MLASCALL
+MlasGemmPackBSizeFp64(
+    size_t N,
+    size_t K
+    )
+/*++
+
+Routine Description:
+
+    This routine computes the length in bytes for the packed matrix B buffer.
+
+Arguments:
+
+    N - Supplies the number of columns of matrix B.
+
+    K - Supplies the number of rows of matrix B.
+
+Return Value:
+
+    Returns the size in bytes for the packed matrix B buffer.
+
+--*/
+{
+    //
+    // Compute the number of bytes required to hold the packed buffer.
+    //
+
+    const size_t AlignedN =
+        (N + MLAS_DGEMM_STRIDEN_THREAD_ALIGN - 1) & ~(MLAS_DGEMM_STRIDEN_THREAD_ALIGN - 1);
+
+    const size_t BytesRequired = AlignedN * K * sizeof(double);
+    const size_t BufferAlignment = MlasGetPreferredBufferAlignment();
+    const size_t AlignedBytesRequired = (BytesRequired + BufferAlignment - 1) &
+        ~(BufferAlignment - 1);
+
+    return AlignedBytesRequired;
+}
+
+void
+MLASCALL
+MlasGemmPackB(
+    CBLAS_TRANSPOSE TransB,
+    size_t N,
+    size_t K,
+    const double* B,
+    size_t ldb,
+    void* PackedB
+    )
+/*++
+
+Routine Description:
+
+    This routine packs the contents of matrix B to the destination buffer. The
+    destination buffer should be sized based on MlasGemmPackBSize(). For best
+    performance, the destination buffer should be aligned to the value returned
+    from MlasGetPreferredBufferAlignment().
+
+Arguments:
+
+    TransB - Supplies the transpose operation for matrix B.
+
+    N - Supplies the number of columns of matrix B.
+
+    K - Supplies the number of rows of matrix B.
+
+    B - Supplies the address of matrix B.
+
+    ldb - Supplies the first dimension of matrix B.
+
+    PackedB - Supplies the address of packed matrix B.
+
+Return Value:
+
+    None.
+
+--*/
+{
+    const size_t AlignedN =
+        (N + MLAS_DGEMM_STRIDEN_THREAD_ALIGN - 1) & ~(MLAS_DGEMM_STRIDEN_THREAD_ALIGN - 1);
+
+    //
+    // Step through each slice of matrix B along the K dimension.
+    //
+
+    size_t CountK;
+
+    for (size_t k = 0; k < K; k += CountK) {
+
+        CountK = std::min(K - k, size_t(MLAS_DGEMM_PACKED_STRIDEK));
+
+        if (TransB == CblasNoTrans) {
+            MlasDgemmCopyPackB((double*)PackedB, B + k * ldb, ldb, N, CountK);
+        } else {
+            MlasDgemmTransposePackB((double*)PackedB, B + k, ldb, N, CountK);
+        }
+
+        PackedB = (double*)PackedB + AlignedN * CountK;
+    }
+}

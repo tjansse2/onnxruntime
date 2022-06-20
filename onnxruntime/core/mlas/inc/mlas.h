@@ -348,6 +348,7 @@ struct MLAS_DGEMM_DATA_PARAMS {
     size_t ldc = 0;            /**< Supplies the first dimension of matrix C. */
     double alpha = 1.0;        /**< Supplies the scalar alpha multiplier (see SGEMM definition) */
     double beta = 0.0;         /**< Supplies the scalar beta multiplier (see SGEMM definition) */
+    bool BIsPacked = false;    /**< Whether B is pre-packed */
 };
 
 /**
@@ -454,6 +455,57 @@ MlasGemm(
     Data.C = C;
     Data.ldc = ldc;
     MlasGemmBatch(TransA, TransB, M, N, K, &Data, 1, ThreadPool);
+}
+
+/**
+ * @brief the double precision matrix/matrix multiply operation (DGEMM) with pre-packed B
+ *
+ * @param TransA      - Supplies the transpose operation for matrix A.
+ * @param M           - Supplies the number of rows of matrix A and matrix C.
+ * @param N           - Supplies the number of columns of matrix B and matrix C.
+ * @param K           - Supplies the number of columns of matrix A and the number
+                        of rows of matrix B.
+ * @param alpha       - Supplies the scalar alpha multiplier (see DGEMM definition).
+ * @param A           - Supplies the address of matrix A.
+ * @param lda         - Supplies the first dimension of matrix A.
+ * @param PackedB     - Supplies the address of packed matrix B.
+ * @param beta        - Supplies the scalar beta multiplier (see DGEMM definition).
+ * @param C           - Supplies the address of matrix C.
+ * @param ldc         - Supplies the first dimension of matrix C.
+ * @param ThreadPool  - Supplies the thread pool object to use, else nullptr if the
+                        base library threading support should be used.
+ */
+inline
+void
+MlasGemm(
+    CBLAS_TRANSPOSE TransA,
+    size_t M,
+    size_t N,
+    size_t K,
+    double alpha,
+    const double* A,
+    size_t lda,
+    const void* PackedB,
+    double beta,
+    double* C,
+    size_t ldc,
+    MLAS_THREADPOOL* ThreadPool
+    )
+{
+    MLAS_DGEMM_DATA_PARAMS DataParams;
+    DataParams.A = A;
+    DataParams.lda = lda;
+    DataParams.B = static_cast<const double*>(PackedB);
+    DataParams.ldb = 0;
+    DataParams.C = C;
+    DataParams.ldc = ldc;
+    DataParams.alpha = alpha;
+    DataParams.beta = beta;
+    DataParams.BIsPacked = true;
+
+    MlasGemmBatch(TransA,
+                  CblasTrans,  // deos not matter when B is packed
+                  M, N, K, &DataParams, 1, ThreadPool);
 }
 
 enum class MLAS_QUANTIZATION_GRANULARITY {
@@ -649,6 +701,13 @@ MlasGemmPackBSize(
     size_t K
     );
 
+size_t
+MLASCALL
+MlasGemmPackBSizeFp64(
+    size_t N,
+    size_t K
+    );
+
 void
 MLASCALL
 MlasGemmPackB(
@@ -656,6 +715,17 @@ MlasGemmPackB(
     size_t N,
     size_t K,
     const float* B,
+    size_t ldb,
+    void* PackedB
+    );
+
+void
+MLASCALL
+MlasGemmPackB(
+    CBLAS_TRANSPOSE TransB,
+    size_t N,
+    size_t K,
+    const double* B,
     size_t ldb,
     void* PackedB
     );

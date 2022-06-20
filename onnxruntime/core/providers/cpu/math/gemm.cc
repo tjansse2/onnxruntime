@@ -108,6 +108,44 @@ bool GemmPackBFp32(AllocatorPtr& alloc,
   return true;
 }
 
+bool GemmPackBFp64(AllocatorPtr& alloc,
+                   const Tensor& tensor_b,
+                   bool trans_b,
+                   BufferUniquePtr& packed_b,
+                   size_t& packed_b_size,
+                   TensorShape& b_shape) {
+  // Only handle the common case of a 2D weight matrix. Additional matrices
+  // could be handled by stacking the packed buffers.
+  if (tensor_b.Shape().NumDimensions() != 2) {
+    return false;
+  }
+  b_shape = tensor_b.Shape();
+
+  const size_t K = trans_b ? static_cast<size_t>(b_shape[1]) : static_cast<size_t>(b_shape[0]);
+  const size_t N = trans_b ? static_cast<size_t>(b_shape[0]) : static_cast<size_t>(b_shape[1]);
+
+  packed_b_size = MlasGemmPackBSizeFp64(N, K);
+  if (packed_b_size == 0) {
+    return false;
+  }
+
+  auto* packed_b_data = alloc->Alloc(packed_b_size);
+
+  // Initialize memory to 0 as there could be some padding associated with pre-packed
+  // buffer memory and we don not want it uninitialized and generate different hashes
+  // if and when we try to cache this pre-packed buffer for sharing between sessions.
+  memset(packed_b_data, 0, packed_b_size);
+
+  packed_b = BufferUniquePtr(packed_b_data, BufferDeleter(alloc));
+  MlasGemmPackB(trans_b ? CblasTrans : CblasNoTrans,
+                N,
+                K,
+                tensor_b.Data<double>(),
+                trans_b ? K : N,
+                packed_b_data);
+  return true;
+}
+
 template <typename T>
 void Gemm<T>::ComputeGemm(CBLAS_TRANSPOSE trans_a, CBLAS_TRANSPOSE trans_b,
                           int64_t M, int64_t N, int64_t K,
@@ -145,6 +183,15 @@ template void Gemm<float>::ComputeGemm(CBLAS_TRANSPOSE trans_a, CBLAS_TRANSPOSE 
                                        float* y_data,
                                        concurrency::ThreadPool* thread_pool);
 
+template void Gemm<double>::ComputeGemm(CBLAS_TRANSPOSE trans_a, CBLAS_TRANSPOSE trans_b,
+                                       int64_t M, int64_t N, int64_t K,
+                                       float alpha,
+                                       const double* a_data, const double* b_data,
+                                       float beta,
+                                       const double* c_data, const TensorShape* c_shape,
+                                       double* y_data,
+                                       concurrency::ThreadPool* thread_pool);
+
 template <typename T>
 Status Gemm<T>::PrePack(const Tensor& /* tensor */, int /* input_idx */, AllocatorPtr /*alloc_for_caching*/,
                         /*out*/ bool& is_packed,
@@ -172,6 +219,25 @@ Status Gemm<float>::PrePack(const Tensor& tensor, int input_idx,
   return Status::OK();
 }
 
+template <>
+Status Gemm<double>::PrePack(const Tensor& tensor, int input_idx,
+                            AllocatorPtr alloc, /*out*/ bool& is_packed,
+                            /*out*/ PrePackedWeights* prepacked_weights) {
+  is_packed = false;
+
+  // only pack Matrix B
+  if (input_idx == 1) {
+    size_t packed_b_size;
+    is_packed = GemmPackBFp64(alloc, tensor, trans_B_ != CblasNoTrans, packed_b_, packed_b_size, b_shape_);
+    bool share_prepacked_weights = (prepacked_weights != nullptr);
+    if (is_packed && share_prepacked_weights) {
+      prepacked_weights->buffers_.push_back(std::move(packed_b_));
+      prepacked_weights->buffer_sizes_.push_back(packed_b_size);
+    }
+  }
+  return Status::OK();
+}
+
 template <typename T>
 Status Gemm<T>::UseSharedPrePackedBuffers(std::vector<BufferUniquePtr>& /*prepacked_buffers*/,
                                           int /*input_idx*/,
@@ -182,6 +248,19 @@ Status Gemm<T>::UseSharedPrePackedBuffers(std::vector<BufferUniquePtr>& /*prepac
 
 template <>
 Status Gemm<float>::UseSharedPrePackedBuffers(std::vector<BufferUniquePtr>& prepacked_buffers,
+                                              int input_idx,
+                                              /*out*/ bool& used_shared_buffers) {
+  used_shared_buffers = false;
+
+  if (input_idx == 1) {
+    used_shared_buffers = true;
+    packed_b_ = std::move(prepacked_buffers[0]);
+  }
+  return Status::OK();
+}
+
+template <>
+Status Gemm<double>::UseSharedPrePackedBuffers(std::vector<BufferUniquePtr>& prepacked_buffers,
                                               int input_idx,
                                               /*out*/ bool& used_shared_buffers) {
   used_shared_buffers = false;
@@ -288,6 +367,61 @@ Status Gemm<float>::Compute(OpKernelContext* context) const {
         static_cast<size_t>(K),
         alpha_,
         A->Data<float>(),
+        static_cast<size_t>(trans_A_ != CblasNoTrans ? M : K),
+        packed_b_.get(),
+        c_data != nullptr ? beta_ : 0.0f,
+        y_data,
+        static_cast<size_t>(N),
+        thread_pool);
+  }
+
+  ComputeActivation(y_data, M * N, thread_pool);
+
+  return Status::OK();
+}
+
+template <>
+Status Gemm<double>::Compute(OpKernelContext* context) const {
+  concurrency::ThreadPool* thread_pool = context->GetOperatorThreadPool();
+
+  const auto* A = context->Input<Tensor>(0);
+  const auto* B = packed_b_ ? nullptr : context->Input<Tensor>(1);
+  const auto* C = context->Input<Tensor>(2);
+
+  // Bias could be missing. Treat as scalar 0 if that is the case.
+  GemmHelper helper(A->Shape(), trans_A_ != CblasNoTrans, B ? B->Shape() : b_shape_, trans_B_ != CblasNoTrans,
+                    C != nullptr ? C->Shape() : TensorShape({}));
+
+  if (!helper.State().IsOK())
+    return helper.State();
+
+  int64_t M = helper.M();
+  int64_t N = helper.N();
+  int64_t K = helper.K();
+
+  auto Y = context->Output(0, {M, N});
+
+  // if input is empty tensor, return as nothing need to be calculated and we've set the shape for the output
+  if (M == 0 || N == 0)
+    return Status::OK();
+
+  double* y_data = Y->MutableData<double>();
+
+  const double* c_data = C != nullptr ? C->Data<double>() : nullptr;
+  const TensorShape* c_shape = C != nullptr ? &C->Shape() : nullptr;
+
+  if (B) {
+    ComputeGemm(trans_A_, trans_B_, M, N, K, alpha_, A->Data<double>(), B->Data<double>(), beta_,
+                c_data, c_shape, y_data, thread_pool);
+  } else {
+    GemmBroadcastBias(M, N, beta_, c_data, c_shape, y_data);
+    MlasGemm(
+        trans_A_,
+        static_cast<size_t>(M),
+        static_cast<size_t>(N),
+        static_cast<size_t>(K),
+        alpha_,
+        A->Data<double>(),
         static_cast<size_t>(trans_A_ != CblasNoTrans ? M : K),
         packed_b_.get(),
         c_data != nullptr ? beta_ : 0.0f,
