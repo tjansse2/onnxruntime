@@ -1301,16 +1301,24 @@ class Sinh final : public OpKernel {
   Status Compute(OpKernelContext* context) const override {
     auto& X = *context->Input<Tensor>(0);
     auto& Y = *context->Output(0, X.Shape());
-    MakeEigenArrayMap<float>(Y) = MakeEigenArrayMap<float>(X).sinh();
+    MakeEigenArrayMap<T>(Y) = MakeEigenArrayMap<T>(X).sinh();
     return Status::OK();
   }
 };
 
-ONNX_CPU_OPERATOR_KERNEL(
+ONNX_CPU_OPERATOR_TYPED_KERNEL(
     Sinh,
     9,
+    float,
     KernelDefBuilder().TypeConstraint("T", DataTypeImpl::GetTensorType<float>()),
     Sinh<float>);
+
+ONNX_CPU_OPERATOR_TYPED_KERNEL(
+    Sinh,
+    9,
+    double,
+    KernelDefBuilder().TypeConstraint("T", DataTypeImpl::GetTensorType<double>()),
+    Sinh<double>);
 
 template <typename T>
 class Cosh final : public OpKernel {

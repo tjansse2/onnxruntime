@@ -95,6 +95,9 @@ Status ElementWiseRangedTransform<T>::Create(const std::string& type, const Node
 
 template Status ElementWiseRangedTransform<float>::Create(const std::string& type, const NodeAttributes& attributes,
                                                           std::unique_ptr<ElementWiseRangedTransform<float>>& out);
+
+template Status ElementWiseRangedTransform<double>::Create(const std::string& type, const NodeAttributes& attributes,
+                                                          std::unique_ptr<ElementWiseRangedTransform<double>>& out);
 }  // namespace functors
 
 namespace functors {
