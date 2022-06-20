@@ -31,5 +31,12 @@ ONNX_CPU_OPERATOR_TYPED_MS_KERNEL(
     KernelDefBuilder().TypeConstraint("T", DataTypeImpl::GetTensorType<float>()),
     FusedGemm<float>);
 
+
+ONNX_CPU_OPERATOR_TYPED_MS_KERNEL(
+    FusedGemm,
+    1,
+    double,
+    KernelDefBuilder().TypeConstraint("T", DataTypeImpl::GetTensorType<double>()),
+    FusedGemm<double>);
 }  // namespace contrib
 }  // namespace onnxruntime
