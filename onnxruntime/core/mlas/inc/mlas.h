@@ -739,6 +739,15 @@ MlasGemmPackBSize(
     bool BIsSigned
     );
 
+size_t
+MLASCALL
+MlasGemmPackBSizeFp64(
+    size_t N,
+    size_t K,
+    bool AIsSigned,
+    bool BIsSigned
+    );
+
 void
 MLASCALL
 MlasGemmPackB(
